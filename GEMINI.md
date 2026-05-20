@@ -1,5 +1,10 @@
 # Memory Bank: Quiniela WC 2026
 
+## 🛡️ Repository Mandates
+- **Surgical Commits:** NEVER perform bulk `git add .` or commit irrelevant files. Every commit must be targeted to the current feature.
+- **Cleanliness:** Only files strictly related to the Quiniela app should exist in this repository. Remove any legacy or template files from previous project contexts immediately.
+- **Verification:** Always confirm file contents and relevance before staging.
+
 ## Project Overview
 A private, async "Quiniela" (draft-style betting pool) for 4 siblings (Emanuel, Obi-Wan, Ruthy, Daniel). 
 **Goal:** Build a functional draft app in a few days.
