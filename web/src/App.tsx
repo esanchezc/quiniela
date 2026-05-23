@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from './lib/supabase'
-import { Trophy, Timer, History, RefreshCcw, LogOut, CheckCircle2, AlertCircle, Send, X, Bell, Wifi, WifiOff, Zap, Settings, Pause, Play, Lock, UserPlus, PlayCircle, ShieldCheck } from 'lucide-react'
+import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, Play, Lock, UserPlus, PlayCircle, ShieldCheck } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -42,11 +42,8 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
   const [isConfirming, setIsConfirming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
-  
-  const lastNotifiedPick = useRef<number | null>(null)
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
@@ -128,18 +125,14 @@ function App() {
       }).eq('id', 1)
       setSelectedTeam(null)
       refreshData()
-    } else {
-      setError("Pick failed.")
     }
     setIsConfirming(false)
   }
 
-  // ADMIN ACTIONS
   const updateDraftState = async (updates: Partial<DraftState>) => {
-    const { error } = await supabase.from('draft_state').update(updates).eq('id', 1)
-    if (error) {
-        console.error("Update failed:", error)
-        alert("Failed to update draft state: " + error.message)
+    const { error: updateError } = await supabase.from('draft_state').update(updates).eq('id', 1)
+    if (updateError) {
+        console.error("Update failed:", updateError)
     }
     refreshData()
   }
@@ -180,7 +173,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-32">
-      {/* BANNERS - SINGLE ACTIVE BANNER AT A TIME */}
       <AnimatePresence mode="wait">
         {!draftState?.is_started ? (
           <motion.div key="setup" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-blue-600 text-white font-black text-center py-4 uppercase tracking-[0.2em] flex items-center justify-center gap-4 relative z-[60] shadow-xl">
@@ -205,20 +197,19 @@ function App() {
         <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Trophy className="text-blue-500 w-8 h-8" />
-            <h1 className="text-xl font-black tracking-tighter uppercase">Quiniela 2026</h1>
+            <h1 className="text-xl font-black tracking-tighter uppercase text-white">Quiniela 2026</h1>
           </div>
 
           <div className="flex items-center gap-6">
             <div className={cn("flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black border", isConnected ? "text-green-500 border-green-500/20 bg-green-500/5" : "text-red-500 border-red-500/20 bg-red-500/5")}>
                {isConnected ? "LIVE" : "OFFLINE"}
             </div>
-            {player && <div className="bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 font-bold text-sm">👤 {player.name}</div>}
-            {isAdmin && <button onClick={() => setShowAdminPanel(true)} className="bg-blue-600 hover:bg-blue-700 p-2.5 rounded-xl transition-all shadow-lg active:scale-95"><Settings className="w-5 h-5 text-white" /></button>}
+            {player && <div className="bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 font-bold text-sm text-white">👤 {player.name}</div>}
+            {isAdmin && <button onClick={() => setShowAdminPanel(true)} className="bg-blue-600 hover:bg-blue-700 p-2.5 rounded-xl transition-all shadow-lg active:scale-95 text-white"><Settings className="w-5 h-5" /></button>}
           </div>
         </div>
       </nav>
 
-      {/* ADMIN PANEL */}
       <AnimatePresence>
         {showAdminPanel && (
           <>
@@ -229,10 +220,10 @@ function App() {
                   <h2 className="text-2xl font-black uppercase tracking-tighter text-white">Commissioner</h2>
                   <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">League Control</p>
                 </div>
-                <button onClick={() => setShowAdminPanel(false)} className="p-3 hover:bg-slate-900 rounded-2xl border border-slate-800"><X/></button>
+                <button onClick={() => setShowAdminPanel(false)} className="p-3 hover:bg-slate-900 rounded-2xl border border-slate-800 text-white"><X/></button>
               </div>
 
-              <div className="space-y-10">
+              <div className="space-y-10 text-white">
                 {!draftState?.is_started ? (
                   <section className="bg-blue-600/10 border-2 border-dashed border-blue-500/30 p-8 rounded-[2.5rem] text-center">
                     <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-6">Setup Complete?</h3>
@@ -334,11 +325,11 @@ function App() {
           
           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl">
              <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-6 uppercase">My Roster ({myRoster.length}/8)</h2>
-             <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+             <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 text-white">
                 {myRoster.map(t => (
                   <div key={t.id} className="flex items-center gap-4 p-4 bg-slate-800/40 rounded-2xl border border-slate-800/50 font-black text-xs uppercase tracking-tight">
                     <span className="text-3xl">{t.flag_emoji}</span>
-                    <span className="flex-1 text-white">{t.name}</span>
+                    <span className="flex-1">{t.name}</span>
                   </div>
                 ))}
                 {myRoster.length === 0 && <div className="text-center py-10 text-slate-600 font-bold italic text-xs uppercase tracking-widest opacity-30">Awaiting picks...</div>}
@@ -353,8 +344,8 @@ function App() {
                 <div className="w-32 h-32 bg-blue-600/10 rounded-full flex items-center justify-center mx-auto border-2 border-dashed border-blue-500/30">
                   <Timer className="w-12 h-12 text-blue-500 animate-pulse" />
                 </div>
-                <div>
-                  <h2 className="text-4xl font-black text-white mb-4 tracking-tighter uppercase italic">Waiting for Draft</h2>
+                <div className="text-white">
+                  <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase italic">Waiting for Draft</h2>
                   <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] max-w-sm mx-auto leading-loose">The Commissioner is finalizing the draft order. Please stay on this page for the live start.</p>
                 </div>
                 <div className="flex justify-center gap-2">
@@ -365,16 +356,16 @@ function App() {
              </motion.div>
            ) : draftState.is_finished ? (
              <div className="space-y-8">
-                <div className="bg-slate-900 rounded-[3rem] border border-slate-800 p-12 text-center shadow-2xl">
+                <div className="bg-slate-900 rounded-[3rem] border border-slate-800 p-12 text-center shadow-2xl text-white">
                    <Trophy className="w-20 h-20 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_20px_rgba(234,179,8,0.3)]" />
-                   <h2 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase italic">Draft Concluded</h2>
+                   <h2 className="text-4xl font-black mb-2 tracking-tighter uppercase italic text-white">Draft Concluded</h2>
                    <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.3em]">Official 2026 World Cup Rosters Set</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    {players.map(p => {
                      const pRoster = teams.filter(t => t.picked_by_id === p.id)
                      return (
-                       <div key={p.id} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-6 shadow-xl">
+                       <div key={p.id} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-6 shadow-xl text-white">
                           <h3 className="font-black text-blue-500 uppercase tracking-widest text-[10px] mb-6 pb-4 border-b border-slate-800 flex justify-between items-center">
                             {p.name} <span>{pRoster.length}/8 Teams</span>
                           </h3>
@@ -382,7 +373,7 @@ function App() {
                              {pRoster.map(t => (
                                <div key={t.id} className="flex items-center gap-2 p-2 bg-slate-800/40 rounded-xl border border-slate-800">
                                  <span className="text-xl">{t.flag_emoji}</span>
-                                 <span className="text-[9px] font-black uppercase truncate text-white">{t.name}</span>
+                                 <span className="text-[9px] font-black uppercase truncate">{t.name}</span>
                                </div>
                              ))}
                           </div>
@@ -394,7 +385,7 @@ function App() {
            ) : (
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                {groupedTeams.map(([letter, groupTeams]) => (
-                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key={letter} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 overflow-hidden shadow-lg group hover:border-blue-500/30 transition-all">
+                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} key={letter} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 overflow-hidden shadow-lg group hover:border-blue-500/30 transition-all">
                    <div className="bg-slate-800/50 px-8 py-5 border-b border-slate-800 font-black text-blue-500 uppercase tracking-widest flex justify-between items-center text-[10px]">
                       Group {letter}
                       <div className="flex gap-1">
@@ -406,7 +397,7 @@ function App() {
                        const pickedBy = players.find(p => p.id === team.picked_by_id)
                        const isSelected = selectedTeam?.id === team.id
                        return (
-                         <button key={team.id} onClick={() => !team.is_picked && isMyTurn && setSelectedTeam(team)} disabled={team.is_picked || !isMyTurn} className={cn("relative p-5 rounded-[1.5rem] border transition-all flex flex-col items-center gap-2 group/btn", team.is_picked ? "bg-slate-950 border-slate-900 opacity-40 grayscale pointer-events-none" : isSelected ? "bg-blue-600 border-blue-400 scale-105 z-10 shadow-2xl" : isMyTurn ? "bg-slate-800 border-slate-700 hover:border-blue-500" : "bg-slate-800/30 border-slate-800 opacity-80")}>
+                         <button key={team.id} onClick={() => !team.is_picked && isMyTurn && setSelectedTeam(team)} disabled={team.is_picked || !isMyTurn} className={cn("relative p-5 rounded-[1.5rem] border transition-all flex flex-col items-center gap-2 group/btn", team.is_picked ? "bg-slate-950 border-slate-900 opacity-40 grayscale pointer-events-none" : isSelected ? "bg-blue-600 border-blue-400 scale-105 z-10 shadow-2xl" : isMyTurn ? "bg-slate-800 border-slate-700 hover:border-blue-500 hover:bg-slate-700 active:scale-95" : "bg-slate-800/30 border-slate-800 opacity-80")}>
                            <span className="text-4xl filter drop-shadow-lg">{team.flag_emoji}</span>
                            <span className="text-[9px] font-black uppercase truncate w-full tracking-tighter text-slate-400">{team.name}</span>
                            {team.is_picked && <div className="absolute inset-0 bg-slate-950/70 flex items-center justify-center font-black text-[9px] text-white p-2 text-center uppercase leading-tight italic">{pickedBy?.name}</div>}
@@ -424,9 +415,9 @@ function App() {
         <div className="col-span-12 lg:col-span-3">
           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl sticky top-24">
              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-8 flex justify-between items-center">Live Feed <Bell className="w-3 h-3 text-blue-500 animate-pulse"/></div>
-             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-3 custom-scrollbar">
+             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-3 custom-scrollbar text-white">
                {pickHistory.map(t => (
-                 <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={t.id} className="flex items-center gap-4 p-5 bg-slate-800/30 rounded-3xl border border-slate-800/50">
+                 <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={t.id} className="flex items-center gap-4 p-5 bg-slate-800/30 rounded-3xl border border-slate-800/50 text-white">
                     <span className="text-3xl">{t.flag_emoji}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-[9px] font-black text-blue-500 uppercase mb-1.5">{players.find(p => p.id === t.picked_by_id)?.name}</p>
@@ -440,7 +431,6 @@ function App() {
         </div>
       </main>
 
-      {/* CONFIRMATION OVERLAY */}
       <AnimatePresence>
         {selectedTeam && isMyTurn && (
           <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-10 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent">
@@ -453,7 +443,7 @@ function App() {
                 </div>
               </div>
               <div className="flex gap-4">
-                <button onClick={() => setSelectedTeam(null)} className="w-20 h-20 bg-blue-800 rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all"><X className="w-8 h-8"/></button>
+                <button onClick={() => setSelectedTeam(null)} className="w-20 h-20 bg-blue-800 rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all text-white"><X className="w-8 h-8"/></button>
                 <button onClick={confirmPick} disabled={isConfirming} className="px-14 h-20 bg-white text-blue-600 font-black rounded-[1.5rem] flex items-center gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-xl uppercase tracking-tighter">
                   {isConfirming ? <RefreshCcw className="animate-spin w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />} Confirm Pick
                 </button>
