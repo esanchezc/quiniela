@@ -433,19 +433,20 @@ function App() {
 
       <AnimatePresence>
         {selectedTeam && isMyTurn && (
-          <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-10 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent">
-            <div className="max-w-3xl mx-auto bg-blue-600 rounded-[3rem] p-10 shadow-2xl flex items-center justify-between border-2 border-blue-400">
-              <div className="flex items-center gap-8 text-white">
-                <span className="text-7xl">{selectedTeam.flag_emoji}</span>
+          <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-4 md:p-10 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent">
+            <div className="max-w-3xl mx-auto bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col md:flex-row items-center justify-between border-2 border-blue-400 gap-6 md:gap-8">
+              <div className="flex items-center gap-4 md:gap-8 text-white w-full md:w-auto">
+                <span className="text-5xl md:text-7xl">{selectedTeam.flag_emoji}</span>
                 <div>
-                  <p className="text-xs font-black uppercase text-blue-200 tracking-[0.3em] mb-2">Ready to Draft?</p>
-                  <h3 className="text-4xl font-black italic tracking-tighter uppercase">{selectedTeam.name}</h3>
+                  <p className="text-[10px] md:text-xs font-black uppercase text-blue-200 tracking-[0.3em] mb-1 md:mb-2">Ready to Draft?</p>
+                  <h3 className="text-2xl md:text-4xl font-black italic tracking-tighter uppercase leading-none">{selectedTeam.name}</h3>
                 </div>
               </div>
-              <div className="flex gap-4">
-                <button onClick={() => setSelectedTeam(null)} className="w-20 h-20 bg-blue-800 rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all text-white"><X className="w-8 h-8"/></button>
-                <button onClick={confirmPick} disabled={isConfirming} className="px-14 h-20 bg-white text-blue-600 font-black rounded-[1.5rem] flex items-center gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-xl uppercase tracking-tighter">
-                  {isConfirming ? <RefreshCcw className="animate-spin w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />} Confirm Pick
+              <div className="flex gap-3 md:gap-4 w-full md:w-auto">
+                <button onClick={() => setSelectedTeam(null)} className="flex-1 md:flex-none w-auto md:w-20 h-14 md:h-20 bg-blue-800 rounded-[1rem] md:rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all active:scale-95"><X className="w-6 h-6 md:w-8 h-8"/></button>
+                <button onClick={confirmPick} disabled={isConfirming} className="flex-[3] md:flex-none px-6 md:px-14 h-14 md:h-20 bg-white text-blue-600 font-black rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center gap-2 md:gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-sm md:text-xl uppercase tracking-tighter">
+                  {isConfirming ? <RefreshCcw className="animate-spin w-5 h-5 md:w-8 h-8" /> : <ShieldCheck className="w-5 h-5 md:w-8 h-8" />} 
+                  <span>Confirm Pick</span>
                 </button>
               </div>
             </div>
