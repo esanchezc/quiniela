@@ -18,23 +18,18 @@ A private, async "Quiniela" (draft-style betting pool) for 4 siblings (Emanuel, 
 
 ## 🏗️ Phase 1: The Draft (In Progress)
 
-### 📋 Requirements
-- [x] **4 Players:** Emanuel, Obi-Wan, Ruthy, Daniel.
-- [x] **48 Teams:** Official 2026 qualifiers (including debutants like Uzbekistan and Jordan).
-- [x] **Draft Format:** Snake (1-2-3-4, 4-3-2-1). 8 rounds (32 teams total picked).
-- [x] **Authentication:** Secret tokens mapped to player names.
+### 📋 Status
+- [x] **Git Repository:** Initialized and pushed to `esanchezc/quiniela`.
+- [x] **Supabase Setup:** Verified connection and seeded 48 official teams/groups.
+- [x] **Draft Logic:** Snake draft logic (1-2-3-4, 4-3-2-1) implemented in `App.tsx`.
+- [x] **Real-time:** Supabase channels configured for instant pick updates.
+- [x] **Authentication:** Secret Link (UID token) logic implemented and verified.
 
-### 🗄️ Database Schema
-- `players`: id, name, draft_order, secret_token (UUID).
-- `teams`: id, name, flag_emoji, is_picked, picked_by_id, pick_number.
-- `draft_state`: current_pick_number (1-32), is_active.
-- `scoring_config`: Rules for points calculation.
-
-### 🎮 Snake Logic
-The player whose turn it is is determined by `(current_pick_number - 1) % 8`.
-- Pick 1-4: Order [1, 2, 3, 4]
-- Pick 5-8: Order [4, 3, 2, 1]
-- ...and so on.
+### 🔗 Handover for Next Session
+- **Immediate Task:** Implement the "My Roster" view to show teams picked by each player.
+- **Optimization:** Add a "Picking History" log to show who picked whom and when.
+- **Vercel:** Prepare for first deployment.
+- **Tokens:** Emanuel should share the secret tokens from the Supabase `players` table with siblings to test.
 
 ---
 
