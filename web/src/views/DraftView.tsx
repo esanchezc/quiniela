@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, UserPlus, Play } from 'lucide-react'
+import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, UserPlus, Play, Plus, Minus, Power, Star } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -33,6 +33,25 @@ interface DraftState {
   is_paused: boolean
   is_finished: boolean
   is_started: boolean
+  auto_fetch_results: boolean
+}
+
+interface Match {
+  id: number
+  team_a_id: number
+  team_b_id: number
+  stage: string
+  status: string
+  score_a: number
+  score_b: number
+  team_a?: { name: string, flag_emoji: string }
+  team_b?: { name: string, flag_emoji: string }
+}
+
+interface WildcardWinners {
+  golden_boot: string | null
+  golden_glove: string | null
+  mvp: string | null
 }
 
 interface DraftViewProps {
@@ -44,6 +63,8 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
   const [players, setPlayers] = useState<Player[]>([])
   const [teams, setTeams] = useState<Team[]>([])
   const [draftState, setDraftState] = useState<DraftState | null>(null)
+  const [matches, setMatches] = useState<Match[]>([])
+  const [wildcardWinners, setWildcardWinners] = useState<WildcardWinners>({ golden_boot: '', golden_glove: '', mvp: '' })
   const [loading, setLoading] = useState(true)
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
   const [isConfirming, setIsConfirming] = useState(false)
@@ -54,16 +75,20 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
       try {
         await fetchPlayers()
         await refreshData()
+        await fetchMatches()
+        await fetchWildcardWinners()
       } finally {
         setLoading(false)
       }
     }
     init()
 
-    const channel = supabase.channel('draft-view-live')
+    const channel = supabase.channel('draft-view-sync-all')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_state' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchPlayers())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchMatches())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_winners' }, () => fetchWildcardWinners())
       .subscribe()
 
     return () => {
@@ -81,6 +106,20 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     if (teamData) setTeams(teamData)
     const { data: stateData } = await supabase.from('draft_state').select('*').single()
     if (stateData) setDraftState(stateData)
+  }
+
+  const fetchMatches = async () => {
+    const { data } = await supabase.from('matches').select(`
+        *,
+        team_a:team_a_id(name, flag_emoji),
+        team_b:team_b_id(name, flag_emoji)
+    `).order('kickoff_time')
+    if (data) setMatches(data as any)
+  }
+
+  const fetchWildcardWinners = async () => {
+    const { data } = await supabase.from('wildcard_winners').select('*').single()
+    if (data) setWildcardWinners(data)
   }
 
   const getActivePlayer = (pickNum: number) => {
@@ -117,7 +156,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     setIsConfirming(false)
   }
 
-  // ADMIN
+  // ADMIN ACTIONS
   const updateDraftState = async (updates: Partial<DraftState>) => {
     await supabase.from('draft_state').update(updates).eq('id', 1)
     refreshData()
@@ -134,10 +173,21 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     refreshData()
   }
 
+  const updateMatch = async (matchId: number, updates: Partial<Match>) => {
+    await supabase.from('matches').update(updates).eq('id', matchId)
+    fetchMatches()
+  }
+
+  const saveWildcardWinners = async () => {
+    await supabase.from('wildcard_winners').update(wildcardWinners).eq('id', 1)
+  }
+
   const resetDraft = async () => {
     if (!window.confirm('🚨 RESET EVERYTHING?')) return
     await supabase.from('teams').update({ is_picked: false, picked_by_id: null, pick_number: null, status: 'active' }).neq('id', 0)
-    await supabase.from('draft_state').update({ current_pick_number: 1, is_paused: false, is_finished: false, is_started: false }).eq('id', 1)
+    await supabase.from('draft_state').update({ current_pick_number: 1, is_paused: false, is_finished: false, is_started: false, auto_fetch_results: false }).eq('id', 1)
+    await supabase.from('matches').update({ status: 'scheduled', score_a: 0, score_b: 0 }).neq('id', 0)
+    await supabase.from('wildcard_winners').update({ golden_boot: null, golden_glove: null, mvp: null }).eq('id', 1)
     refreshData()
   }
 
@@ -229,7 +279,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
           </div>
         </div>
 
-        <div className="col-span-12 lg:col-span-6 space-y-8 text-white">
+        <div className="col-span-12 lg:col-span-6 space-y-8 text-white text-center">
            {!draftState?.is_started ? (
              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-slate-900 rounded-[3rem] border border-slate-800 p-16 text-center space-y-8 shadow-2xl text-white">
                 <div className="w-32 h-32 bg-blue-600/10 rounded-full flex items-center justify-center mx-auto border-2 border-dashed border-blue-500/30 text-white text-center">
@@ -295,8 +345,8 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         </div>
 
         <div className="col-span-12 lg:col-span-3 text-white text-center">
-          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl sticky top-24 text-white">
-             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-8 flex justify-between items-center text-white">Live Feed <Bell className="w-3 h-3 text-blue-500 animate-pulse text-white"/></div>
+          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl sticky top-24 text-white text-center">
+             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-8 flex justify-between items-center text-white text-center">Live Feed <Bell className="w-3 h-3 text-blue-500 animate-pulse text-white"/></div>
              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-3 custom-scrollbar text-white">
                {pickHistory.map(t => (
                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={t.id} className="flex items-center gap-4 p-5 bg-slate-800/30 rounded-3xl border border-slate-800/50 text-white">
@@ -335,41 +385,136 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
                   <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 text-center">
                     <div className="grid grid-cols-2 gap-4">
                       <button onClick={() => updateDraftState({ is_paused: !draftState?.is_paused })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs">
-                        {draftState?.is_paused ? <Play className="mx-auto mb-1" /> : <Pause className="mx-auto mb-1" />} {draftState?.is_paused ? "Resume" : "Pause"}
+                        {draftState?.is_paused ? <Play className="mx-auto mb-1 text-white" /> : <Pause className="mx-auto mb-1 text-white" />} {draftState?.is_paused ? "Resume" : "Pause"}
                       </button>
                       <button onClick={() => updateDraftState({ is_finished: !draftState?.is_finished })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs">
-                        <Lock className="mx-auto mb-1" /> {draftState?.is_finished ? "Unlock" : "End Draft"}
+                        <Lock className="mx-auto mb-1 text-white" /> {draftState?.is_finished ? "Unlock" : "End Draft"}
                       </button>
                     </div>
                   </section>
                 )}
 
-                {/* STATUS MANAGER */}
-                <section>
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">Set Team Status</h3>
-                   <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                      {teams.filter(t => t.is_picked).sort((a,b) => (a.pick_number || 0) - (b.pick_number || 0)).map(t => (
-                        <div key={t.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between gap-4">
-                           <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-xl">{t.flag_emoji}</span>
-                              <span className="text-[10px] font-black uppercase truncate">{t.name}</span>
+                <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                           <Power className={cn("w-5 h-5", draftState?.auto_fetch_results ? "text-green-500" : "text-slate-600")} />
+                           <div>
+                              <h3 className="text-[10px] font-black uppercase text-white tracking-widest">Auto Result Fetching</h3>
+                              <p className="text-[8px] text-slate-500 uppercase font-bold">Poll results every 15m</p>
                            </div>
-                           <select 
-                             value={t.status}
-                             onChange={(e) => setTeamStatus(t.id, e.target.value)}
-                             className="bg-slate-950 border border-slate-700 rounded-lg text-[10px] font-black uppercase p-2 focus:outline-none focus:border-blue-500 text-white"
-                           >
+                        </div>
+                        <button 
+                           onClick={() => updateDraftState({ auto_fetch_results: !draftState?.auto_fetch_results })}
+                           className={cn(
+                             "w-12 h-6 rounded-full transition-all relative p-1",
+                             draftState?.auto_fetch_results ? "bg-green-600" : "bg-slate-700"
+                           )}
+                        >
+                           <div className={cn(
+                             "w-4 h-4 bg-white rounded-full transition-all shadow-md",
+                             draftState?.auto_fetch_results ? "translate-x-6" : "translate-x-0"
+                           )} />
+                        </button>
+                    </div>
+                </section>
+
+                {/* WILDCARD WINNERS MANAGER */}
+                <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 space-y-6">
+                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Star className="w-4 h-4 text-wc-gold" /> Set Wildcard Winners
+                   </h3>
+                   <div className="space-y-4">
+                      <div className="space-y-1.5">
+                         <label className="text-[8px] font-black text-slate-500 uppercase">Golden Boot</label>
+                         <input 
+                           value={wildcardWinners.golden_boot || ''} 
+                           onChange={(e) => setWildcardWinners({...wildcardWinners, golden_boot: e.target.value})}
+                           placeholder="Winner name..."
+                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
+                         />
+                      </div>
+                      <div className="space-y-1.5">
+                         <label className="text-[8px] font-black text-slate-500 uppercase">Golden Glove</label>
+                         <input 
+                           value={wildcardWinners.golden_glove || ''} 
+                           onChange={(e) => setWildcardWinners({...wildcardWinners, golden_glove: e.target.value})}
+                           placeholder="Winner name..."
+                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
+                         />
+                      </div>
+                      <div className="space-y-1.5">
+                         <label className="text-[8px] font-black text-slate-500 uppercase">Tournament MVP</label>
+                         <input 
+                           value={wildcardWinners.mvp || ''} 
+                           onChange={(e) => setWildcardWinners({...wildcardWinners, mvp: e.target.value})}
+                           placeholder="Winner name..."
+                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
+                         />
+                      </div>
+                      <button 
+                        onClick={saveWildcardWinners}
+                        className="w-full py-3 bg-wc-gold text-wc-blue font-black rounded-xl text-[10px] uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all"
+                      >
+                         Save Winners
+                      </button>
+                   </div>
+                </section>
+
+                <section>
+                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 text-left">Match Simulator</h3>
+                   <div className="space-y-3">
+                      {matches.map(match => (
+                        <div key={match.id} className="bg-slate-900 p-4 rounded-3xl border border-slate-800 space-y-4">
+                           <div className="flex justify-between items-center text-[8px] font-black uppercase text-slate-600">
+                              <span>{match.stage}</span>
+                              <span className={cn(match.status === 'live' ? 'text-red-500 animate-pulse' : '')}>{match.status}</span>
+                           </div>
+                           <div className="flex items-center justify-between gap-4">
+                              <div className="flex-1 flex flex-col items-center gap-1">
+                                 <span className="text-xl">{match.team_a?.flag_emoji}</span>
+                                 <div className="flex items-center gap-2">
+                                    <button onClick={() => updateMatch(match.id, { score_a: Math.max(0, match.score_a - 1) })} className="p-1 bg-slate-800 rounded-md text-white"><Minus className="w-3 h-3"/></button>
+                                    <span className="text-xl font-black text-white">{match.score_a}</span>
+                                    <button onClick={() => updateMatch(match.id, { score_a: match.score_a + 1 })} className="p-1 bg-slate-800 rounded-md text-white"><Plus className="w-3 h-3"/></button>
+                                 </div>
+                              </div>
+                              <div className="text-slate-700 font-black">VS</div>
+                              <div className="flex-1 flex flex-col items-center gap-1">
+                                 <span className="text-xl">{match.team_b?.flag_emoji}</span>
+                                 <div className="flex items-center gap-2">
+                                    <button onClick={() => updateMatch(match.id, { score_b: Math.max(0, match.score_b - 1) })} className="p-1 bg-slate-800 rounded-md text-white"><Minus className="w-3 h-3"/></button>
+                                    <span className="text-xl font-black text-white">{match.score_b}</span>
+                                    <button onClick={() => updateMatch(match.id, { score_b: match.score_b + 1 })} className="p-1 bg-slate-800 rounded-md text-white"><Plus className="w-3 h-3"/></button>
+                                 </div>
+                              </div>
+                           </div>
+                           <div className="flex gap-2">
+                              <button onClick={() => updateMatch(match.id, { status: 'live' })} className="flex-1 py-2 bg-red-600/10 text-red-500 rounded-xl text-[8px] font-black uppercase border border-red-500/20">Go Live</button>
+                              <button onClick={() => updateMatch(match.id, { status: 'finished' })} className="flex-1 py-2 bg-slate-800 text-slate-400 rounded-xl text-[8px] font-black uppercase border border-slate-700">Finish</button>
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                </section>
+
+                <section>
+                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 text-left">Set Team Status</h3>
+                   <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                      {teams.filter(t => t.is_picked).map(t => (
+                        <div key={t.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
+                           <span className="text-[10px] font-black uppercase truncate w-24 text-left">{t.name}</span>
+                           <select value={t.status} onChange={(e) => setTeamStatus(t.id, e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg text-[9px] p-1 text-white">
                               <option value="active">Active</option>
-                              <option value="group_1st">1st Place</option>
-                              <option value="group_2nd">2nd Place</option>
+                              <option value="group_1st">1st</option>
+                              <option value="group_2nd">2nd</option>
                               <option value="group_3rd_adv">3rd (Adv)</option>
-                              <option value="not_advancing_3rd">3rd (Fails)</option>
-                              <option value="not_advancing_4th">4th Place</option>
-                              <option value="r32_win">R32 Win</option>
-                              <option value="r16_win">R16 Win</option>
-                              <option value="qf_win">QF Win</option>
-                              <option value="sf_win">SF Win</option>
-                              <option value="final_win">Champion</option>
+                              <option value="not_advancing_3rd">3rd (Out)</option>
+                              <option value="not_advancing_4th">4th</option>
+                              <option value="r32_win">R32</option>
+                              <option value="r16_win">R16</option>
+                              <option value="qf_win">QF</option>
+                              <option value="sf_win">SF</option>
+                              <option value="final_win">Champ</option>
                            </select>
                         </div>
                       ))}
@@ -378,14 +523,14 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
 
                 {!draftState?.is_started && (
                   <section>
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2"><UserPlus className="w-4 h-4"/> Set Draft Order</h3>
-                    <div className="space-y-3 text-center">
+                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">Draft Order</h3>
+                    <div className="space-y-3">
                       {players.map(p => (
-                        <div key={p.id} className="flex items-center gap-4 bg-slate-900 p-5 rounded-3xl border border-slate-800 text-center">
+                        <div key={p.id} className="flex items-center gap-4 bg-slate-900 p-4 rounded-3xl border border-slate-800">
                           <span className="font-bold flex-1 text-white text-left">{p.name}</span>
-                          <div className="flex gap-1.5">
+                          <div className="flex gap-1">
                             {[1,2,3,4].map(num => (
-                              <button key={num} onClick={() => setPlayerOrder(p.id, num)} className={cn("w-9 h-9 rounded-xl text-xs font-black", p.draft_order === num ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-500")}>{num}</button>
+                              <button key={num} onClick={() => setPlayerOrder(p.id, num)} className={cn("w-8 h-8 rounded-lg text-xs font-black", p.draft_order === num ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-500")}>{num}</button>
                             ))}
                           </div>
                         </div>
@@ -405,14 +550,13 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         )}
       </AnimatePresence>
 
-      {/* CONFIRMATION OVERLAY */}
       <AnimatePresence>
         {selectedTeam && isMyTurn && (
           <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-4 md:p-10 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent text-white">
             <div className="max-w-3xl mx-auto bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col md:flex-row items-center justify-between border-2 border-blue-400 gap-6 md:gap-8 text-white">
               <div className="flex items-center gap-4 md:gap-8 text-white w-full md:w-auto text-white">
                 <span className="text-5xl md:text-7xl text-white">{selectedTeam.flag_emoji}</span>
-                <div className="text-white">
+                <div className="text-white text-left">
                   <p className="text-[10px] md:text-xs font-black uppercase text-blue-200 tracking-[0.3em] mb-1 md:mb-2 text-white">Ready to Draft?</p>
                   <h3 className="text-2xl md:text-4xl font-black italic tracking-tighter uppercase leading-none text-white text-left">{selectedTeam.name}</h3>
                 </div>

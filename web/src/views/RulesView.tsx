@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Shield, Target, UserCheck, Star, RefreshCcw, Trophy, Edit2, Check, X } from 'lucide-react'
+import { Shield, Target, UserCheck, Star, RefreshCcw, Trophy, Edit2, Check, X, AlertCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -26,6 +26,8 @@ interface RulesViewProps {
   isAdmin: boolean
 }
 
+const WC_START_DATE = new Date('2026-06-11T20:00:00Z') // World Cup Kickoff
+
 export function RulesView({ player, isAdmin }: RulesViewProps) {
   const [config, setConfig] = useState<ScoringConfig[]>([])
   const [picks, setPicks] = useState<WildcardPicks>({
@@ -37,6 +39,8 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
   const [saving, setSaving] = useState(false)
   const [editingRule, setEditingRule] = useState<string | null>(null)
   const [editValue, setEditValue] = useState<number>(0)
+  
+  const isWCLive = new Date() > WC_START_DATE
 
   useEffect(() => {
     fetchData()
@@ -49,7 +53,7 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
     if (player) {
       const { data: pickData } = await supabase
         .from('wildcard_picks')
-        .select('*')
+        .select('golden_boot_name, golden_glove_name, mvp_name')
         .eq('player_id', player.id)
         .maybeSingle()
       if (pickData) setPicks(pickData)
@@ -59,14 +63,27 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
 
   const handleSavePicks = async () => {
     if (!player) return
+    if (isWCLive) return alert("Tournament has started! Wildcards are locked.")
+    
+    const confirm = window.confirm("Are you sure? You can change these until the World Cup starts on June 11th.")
+    if (!confirm) return
+
     setSaving(true)
     const { error } = await supabase
       .from('wildcard_picks')
       .upsert({ 
         player_id: player.id,
-        ...picks
-      })
-    if (error) alert("Failed to save picks")
+        golden_boot_name: picks.golden_boot_name,
+        golden_glove_name: picks.golden_glove_name,
+        mvp_name: picks.mvp_name
+      }, { onConflict: 'player_id' }) // Explicitly handle the conflict target
+    
+    if (error) {
+        console.error("Save error:", error)
+        alert("Failed to save picks: " + error.message)
+    } else {
+        alert("Predictions saved successfully! 🏆")
+    }
     setSaving(false)
   }
 
@@ -91,12 +108,14 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-12 pb-32 text-white">
+      
+      {/* POINTS BREAKDOWN */}
       <section className="space-y-6 text-white text-center md:text-left">
         <div className="flex items-center justify-center md:justify-start gap-4 border-b border-slate-800 pb-4 text-white">
            <Shield className="text-blue-500 w-8 h-8 text-white" />
            <h2 className="text-3xl font-black uppercase tracking-tighter text-white italic">The Points System</h2>
         </div>
-        <div className="grid gap-4 text-white">
+        <div className="grid gap-4 text-white text-left">
           {config.map((rule) => {
             const isEditing = editingRule === rule.rule_name
             return (
@@ -104,7 +123,7 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
                 "bg-slate-900/50 p-6 rounded-[2rem] border transition-all duration-300 flex items-center justify-between group text-white",
                 isEditing ? "border-blue-500 bg-blue-500/5 shadow-lg text-white" : "border-slate-800 hover:border-slate-700 text-white"
               )}>
-                <div className="flex-1 text-white text-left">
+                <div className="flex-1 text-white">
                   <h3 className="font-black text-sm uppercase text-slate-300 group-hover:text-white transition-colors tracking-tight text-white">{rule.description}</h3>
                   <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest mt-1 text-white">Rule ID: {rule.rule_name}</p>
                 </div>
@@ -137,12 +156,21 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
         </div>
       </section>
 
+      {/* WILDCARDS */}
       <section className="space-y-6 text-white text-center md:text-left">
         <div className="flex items-center justify-center md:justify-start gap-4 border-b border-slate-800 pb-4 text-white">
            <Star className="text-wc-gold w-8 h-8 text-white" />
            <h2 className="text-3xl font-black uppercase tracking-tighter text-white italic">Wildcard Predictions</h2>
         </div>
         <div className="bg-slate-900 rounded-[3rem] border border-slate-800 p-10 space-y-10 shadow-2xl relative overflow-hidden text-white">
+          {isWCLive && (
+            <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] z-20 flex items-center justify-center p-8 text-center flex-col gap-4">
+               <Shield className="w-12 h-12 text-wc-gold" />
+               <h3 className="text-xl font-black uppercase italic text-white tracking-tighter">PREDICTIONS LOCKED</h3>
+               <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Tournament is live. Choices cannot be changed.</p>
+            </div>
+          )}
+
           <div className="grid gap-10 text-white">
             {[
                 { label: 'Golden Boot (Top Scorer)', icon: Target, key: 'golden_boot_name' },
@@ -155,17 +183,40 @@ export function RulesView({ player, isAdmin }: RulesViewProps) {
                         <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 text-white">
                             <Icon className="w-4 h-4 text-white" /> {item.label}
                         </label>
-                        <input value={(picks as any)[item.key]} onChange={(e) => setPicks({...picks, [item.key]: e.target.value})} placeholder="Enter player name..." className="w-full bg-slate-950/50 border border-slate-800 rounded-[1.5rem] p-6 font-bold text-lg text-white placeholder:text-slate-800 focus:outline-none focus:border-wc-gold/50 focus:ring-4 focus:ring-wc-gold/5 transition-all shadow-inner text-white" />
+                        <input 
+                            value={(picks as any)[item.key] || ''} 
+                            onChange={(e) => setPicks({...picks, [item.key]: e.target.value})} 
+                            disabled={isWCLive || !player}
+                            placeholder="Enter player name..." 
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-[1.5rem] p-6 font-bold text-lg text-white placeholder:text-slate-800 focus:outline-none focus:border-wc-gold/50 focus:ring-4 focus:ring-wc-gold/5 transition-all shadow-inner text-white disabled:opacity-50" 
+                        />
                     </div>
                 )
             })}
           </div>
           <div className="pt-4 text-white text-center">
-            <button onClick={handleSavePicks} disabled={saving || !player} className="w-full py-6 bg-wc-gold text-wc-blue font-black rounded-3xl flex items-center justify-center gap-4 shadow-2xl shadow-wc-gold/10 hover:scale-[1.01] active:scale-95 disabled:opacity-30 transition-all uppercase tracking-[0.2em] text-sm italic text-wc-blue">
-              {saving ? <RefreshCcw className="animate-spin w-6 h-6 text-wc-blue" /> : <Trophy className="w-6 h-6 text-wc-blue" />}
+            <button 
+                onClick={handleSavePicks} 
+                disabled={saving || !player || isWCLive} 
+                className="w-full py-6 bg-wc-gold text-wc-blue font-black rounded-3xl flex items-center justify-center gap-4 shadow-2xl shadow-wc-gold/10 hover:scale-[1.01] active:scale-95 disabled:opacity-30 transition-all uppercase tracking-[0.2em] text-sm italic"
+            >
+              {saving ? <RefreshCcw className="animate-spin w-6 h-6" /> : <Trophy className="w-6 h-6" />}
               {saving ? 'Validating Picks...' : 'Lock In Choices'}
             </button>
+            {!player && (
+              <div className="flex items-center justify-center gap-2 mt-6 text-red-500 bg-red-500/10 py-3 rounded-xl border border-red-500/20">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Access via your secret link to save picks</span>
+              </div>
+            )}
           </div>
+        </div>
+        
+        <div className="bg-slate-900/30 p-6 rounded-2xl border border-slate-800/50 max-w-2xl mx-auto text-center">
+            <p className="text-slate-600 text-center text-[10px] font-bold uppercase tracking-wider leading-relaxed">
+                <span className="text-wc-gold">Rules:</span> Predictions lock on June 11th. 
+                <br/>Correct: <span className="text-green-500">+15 pts</span> | Sole Winner: <span className="text-green-500">+30 pts</span>
+            </p>
         </div>
       </section>
 
