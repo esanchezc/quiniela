@@ -19,6 +19,7 @@ interface Team {
   name: string
   flag_emoji: string
   picked_by_id: string | null
+  is_picked: boolean
   status: string
 }
 
@@ -69,10 +70,15 @@ export function LeaderboardView() {
   useEffect(() => {
     fetchData()
     
-    const channel = supabase.channel('leaderboard-refresh')
+    // Unified refresh channel
+    const channel = supabase.channel('leaderboard-global-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_winners' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_picks' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_state' }, (payload: any) => {
+          // If draft is reset to 1, force a clean refresh
+          if (payload.new && payload.new.current_pick_number === 1) fetchData()
+      })
       .subscribe()
 
     return () => {
@@ -82,7 +88,8 @@ export function LeaderboardView() {
 
   const fetchData = async () => {
     const { data: pData } = await supabase.from('players').select('id, name')
-    const { data: tData } = await supabase.from('teams').select('*').not('picked_by_id', 'is', null)
+    // We fetch all teams then filter in useMemo to ensure stale IDs don't linger
+    const { data: tData } = await supabase.from('teams').select('*')
     const { data: cData } = await supabase.from('scoring_config').select('rule_name, points_value')
     const { data: wpData } = await supabase.from('wildcard_picks').select('*')
     const { data: wwData } = await supabase.from('wildcard_winners').select('*').single()
@@ -101,22 +108,25 @@ export function LeaderboardView() {
     const getPoints = (rule: string) => config.find(c => c.rule_name === rule)?.points_value || 0
 
     return players.map(player => {
-        const playerTeams = teams.filter(t => t.picked_by_id === player.id)
+        // FILTER: Only teams actually picked by this player
+        const playerTeams = teams.filter(t => t.picked_by_id === player.id && t.is_picked)
         let teamPointsTotal = 0
         
         const teamBreakdown = playerTeams.map(team => {
             let teamPoints = 0
-            if (team.status === 'group_1st') teamPoints = getPoints('group_1st')
-            if (team.status === 'group_2nd') teamPoints = getPoints('group_2nd')
-            if (team.status === 'group_3rd_adv') teamPoints = getPoints('group_3rd_adv')
-            if (team.status === 'not_advancing_3rd') teamPoints = getPoints('not_advancing_3rd')
-            if (team.status === 'not_advancing_4th') teamPoints = getPoints('not_advancing_4th')
+            const s = team.status || 'active'
             
-            if (team.status === 'r32_win') teamPoints = getPoints('group_1st') + getPoints('r32_win')
-            if (team.status === 'r16_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win')
-            if (team.status === 'qf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win')
-            if (team.status === 'sf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win')
-            if (team.status === 'final_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win') + getPoints('final_win')
+            if (s === 'group_1st') teamPoints = getPoints('group_1st')
+            if (s === 'group_2nd') teamPoints = getPoints('group_2nd')
+            if (s === 'group_3rd_adv') teamPoints = getPoints('group_3rd_adv')
+            if (s === 'not_advancing_3rd') teamPoints = getPoints('not_advancing_3rd')
+            if (s === 'not_advancing_4th') teamPoints = getPoints('not_advancing_4th')
+            
+            if (s === 'r32_win') teamPoints = getPoints('group_1st') + getPoints('r32_win')
+            if (s === 'r16_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win')
+            if (s === 'qf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win')
+            if (s === 'sf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win')
+            if (s === 'final_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win') + getPoints('final_win')
 
             teamPointsTotal += teamPoints
             return { team, points: teamPoints }
@@ -142,7 +152,6 @@ export function LeaderboardView() {
 
                 const isCorrect = cat.pick?.trim().toLowerCase() === cat.winner?.trim().toLowerCase()
                 if (isCorrect) {
-                    // Check if sole winner
                     const othersCorrect = allWildcardPicks.filter(wp => 
                         wp.player_id !== player.id && 
                         (wp as any)[`${cat.id}_name`]?.trim().toLowerCase() === cat.winner?.trim().toLowerCase()
@@ -216,7 +225,7 @@ export function LeaderboardView() {
         
         <div className="space-y-4">
           {scores.map((score, idx) => (
-            <div key={score.player.id} className="bg-slate-900/50 rounded-[2rem] border border-slate-800 overflow-hidden transition-all hover:border-slate-700">
+            <div key={score.player.id} className="bg-slate-900/50 rounded-[2rem] border border-slate-800 overflow-hidden transition-all hover:border-slate-700 shadow-xl">
                <button 
                  onClick={() => setExpandedPlayer(expandedPlayer === score.player.id ? null : score.player.id)}
                  className="w-full p-6 flex items-center justify-between group"
@@ -225,13 +234,13 @@ export function LeaderboardView() {
                     <span className="font-black text-slate-700 text-xl italic w-6">0{idx + 1}</span>
                     <div className="text-left">
                        <p className="font-black text-white uppercase tracking-tighter text-xl group-hover:text-blue-500 transition-colors">{score.player.name}</p>
-                       <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{score.teamBreakdown.length} Teams Drafted</p>
+                       <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{score.teamBreakdown.length} Teams Active</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-8">
                     <div className="text-right">
                        <p className="text-2xl font-black italic tracking-tighter text-white">{score.totalPoints}</p>
-                       <p className="text-[9px] font-black text-green-500 uppercase tracking-widest">Total Points</p>
+                       <p className="text-[9px] font-black text-green-500 uppercase tracking-widest">Total Score</p>
                     </div>
                     <ChevronRight className={cn("w-6 h-6 text-slate-700 transition-transform", expandedPlayer === score.player.id && "rotate-90 text-blue-500")} />
                   </div>
@@ -244,14 +253,13 @@ export function LeaderboardView() {
                         className="bg-slate-950/50 border-t border-slate-800 overflow-hidden"
                     >
                         <div className="p-8 space-y-10">
-                            {/* Team Points */}
                             <section>
                                 <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4 flex items-center gap-2">
-                                    <Trophy className="w-3 h-3" /> Team Performance (+{score.teamPoints})
+                                    <Trophy className="w-3 h-3" /> Team Breakdown (+{score.teamPoints})
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-white">
                                     {score.teamBreakdown.map(({ team, points }) => (
-                                        <div key={team.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
+                                        <div key={team.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg">
                                             <div className="flex items-center gap-3">
                                                 <span className="text-2xl">{team.flag_emoji}</span>
                                                 <div>
@@ -264,10 +272,10 @@ export function LeaderboardView() {
                                             </div>
                                         </div>
                                     ))}
+                                    {score.teamBreakdown.length === 0 && <p className="col-span-full py-6 text-slate-700 font-bold italic text-[10px] uppercase tracking-widest opacity-50">No teams drafted in current session.</p>}
                                 </div>
                             </section>
 
-                            {/* Wildcard Points */}
                             <section>
                                 <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4 flex items-center gap-2">
                                     <Star className="w-3 h-3 text-wc-gold" /> Prediction Bonuses (+{score.wildcardPoints})
@@ -275,7 +283,7 @@ export function LeaderboardView() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {score.wildcardBreakdown.map((wc, i) => (
                                         <div key={i} className={cn(
-                                            "p-4 rounded-2xl border flex flex-col gap-2 relative overflow-hidden",
+                                            "p-4 rounded-2xl border flex flex-col gap-2 relative overflow-hidden shadow-lg",
                                             wc.points > 0 ? "bg-wc-gold/10 border-wc-gold/30" : "bg-slate-900 border-slate-800"
                                         )}>
                                             {wc.points > 0 && <div className="absolute top-0 right-0 p-1 bg-wc-gold text-wc-blue font-black text-[8px] rounded-bl-lg uppercase tracking-tighter">WINNER</div>}

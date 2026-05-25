@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, Play, Power, Star } from 'lucide-react'
+import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, Play, Star } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -24,7 +24,6 @@ interface Team {
   picked_by_id: string | null
   group_letter: string
   pick_number: number | null
-  status: string
 }
 
 interface DraftState {
@@ -69,7 +68,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     }
     init()
 
-    const channel = supabase.channel('draft-view-sync-simple')
+    const channel = supabase.channel('draft-view-v4')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_state' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchPlayers())
@@ -128,12 +127,15 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
       }).eq('id', 1)
       setSelectedTeam(null)
       refreshData()
+    } else {
+        alert("Pick failed: " + pickError.message)
     }
     setIsConfirming(false)
   }
 
   const updateDraftState = async (updates: Partial<DraftState>) => {
-    await supabase.from('draft_state').update(updates).eq('id', 1)
+    const { error } = await supabase.from('draft_state').update(updates).eq('id', 1)
+    if (error) alert("Update failed: " + error.message)
     refreshData()
   }
 
@@ -144,34 +146,49 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
   }
 
   const saveWildcardWinners = async () => {
-    await supabase.from('wildcard_winners').update(wildcardWinners).eq('id', 1)
+    const { error } = await supabase.from('wildcard_winners').update(wildcardWinners).eq('id', 1)
+    if (error) alert("Save failed: " + error.message)
   }
 
   const resetDraft = async () => {
-    if (!window.confirm('🚨 RESET EVERYTHING? All picks and wildcard winners will be cleared.')) return
+    if (!window.confirm('🚨 RESET EVERYTHING? This will clear ALL picks and wildcard winners.')) return
     
-    await supabase.from('teams').update({ 
+    setLoading(true)
+    
+    // REMOVED 'status' update
+    const { error: tError } = await supabase.from('teams').update({ 
       is_picked: false, 
       picked_by_id: null, 
-      pick_number: null, 
-      status: 'active' 
-    }).neq('id', 0)
+      pick_number: null
+    }).gt('id', 0)
     
-    await supabase.from('draft_state').update({ 
+    if (tError) {
+        alert("Teams Reset Failed: " + tError.message)
+        setLoading(false)
+        return
+    }
+
+    const { error: dError } = await supabase.from('draft_state').update({ 
       current_pick_number: 1, 
       is_paused: false, 
       is_finished: false, 
       is_started: false, 
       auto_fetch_results: false 
     }).eq('id', 1)
-    
-    await supabase.from('wildcard_winners').update({ 
+
+    if (dError) alert("Draft State Reset Failed: " + dError.message)
+
+    const { error: wError } = await supabase.from('wildcard_winners').update({ 
       golden_boot: null, 
       golden_glove: null, 
       mvp: null 
     }).eq('id', 1)
-    
-    refreshData()
+
+    if (wError) alert("Wildcard Reset Failed: " + wError.message)
+
+    await refreshData()
+    setLoading(false)
+    alert("System Reset Successfully! 🔄")
   }
 
   const groupedTeams = useMemo(() => {
@@ -192,7 +209,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
   const myRoster = teams.filter(t => t.picked_by_id === player?.id).sort((a,b) => (a.pick_number || 0) - (b.pick_number || 0))
   const pickHistory = teams.filter(t => t.is_picked).sort((a,b) => (b.pick_number || 0) - (a.pick_number || 0))
 
-  if (loading) return <div className="flex items-center justify-center p-20"><RefreshCcw className="w-12 h-12 animate-spin text-blue-500" /></div>
+  if (loading) return <div className="flex flex-col items-center justify-center p-20 gap-4"><RefreshCcw className="w-12 h-12 animate-spin text-blue-500" /><p className="font-black text-xs animate-pulse uppercase tracking-widest text-slate-500 text-white">Syncing Stadium...</p></div>
 
   return (
     <div className="relative text-white">
@@ -208,15 +225,15 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
       <AnimatePresence mode="wait">
         {!draftState?.is_started ? (
           <motion.div key="setup" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-blue-600 text-white font-black text-center py-4 uppercase tracking-[0.2em] flex items-center justify-center gap-4 shadow-xl mb-6">
-             <Timer className="w-5 h-5 animate-pulse" /> DRAFT NOT STARTED <Timer className="w-5 h-5 animate-pulse" />
+             <Timer className="w-5 h-5 animate-pulse text-white" /> DRAFT NOT STARTED <Timer className="w-5 h-5 animate-pulse text-white" />
           </motion.div>
         ) : draftState.is_finished ? (
           <motion.div key="finished" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-green-600 text-white font-black text-center py-4 uppercase tracking-[0.3em] flex items-center justify-center gap-4 shadow-2xl mb-6">
-             <Trophy className="w-6 h-6" /> DRAFT COMPLETE <Trophy className="w-6 h-6" />
+             <Trophy className="w-6 h-6 text-white" /> DRAFT COMPLETE <Trophy className="w-6 h-6 text-white" />
           </motion.div>
         ) : draftState.is_paused ? (
-          <motion.div key="paused" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-red-600 text-white font-black text-center py-3 uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl mb-6 text-white">
-             <Pause className="w-5 h-5 fill-current" /> DRAFT PAUSED <Pause className="w-5 h-5 fill-current" />
+          <motion.div key="paused" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-red-600 text-white font-black text-center py-3 uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl mb-6 text-white text-center">
+             <Pause className="w-5 h-5 fill-current text-white" /> DRAFT PAUSED <Pause className="w-5 h-5 fill-current text-white" />
           </motion.div>
         ) : isMyTurn ? (
           <motion.div key="turn" initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-wc-gold text-wc-blue font-black text-center py-3 uppercase italic tracking-tighter flex items-center justify-center gap-3 shadow-lg mb-6">
@@ -248,10 +265,9 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
               })}
             </div>
           </div>
-          
           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl text-white text-center">
              <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-6 uppercase">My Roster ({myRoster.length}/8)</h2>
-             <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 text-white">
+             <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 text-white text-left">
                 {myRoster.map(t => (
                   <div key={t.id} className="flex items-center gap-4 p-4 bg-slate-800/40 rounded-2xl border border-slate-800/50 font-black text-xs uppercase tracking-tight text-white">
                     <span className="text-3xl">{t.flag_emoji}</span>
@@ -266,8 +282,8 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         <div className="col-span-12 lg:col-span-6 space-y-8 text-white text-center">
            {!draftState?.is_started ? (
              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-slate-900 rounded-[3rem] border border-slate-800 p-16 text-center space-y-8 shadow-2xl text-white">
-                <div className="w-32 h-32 bg-blue-600/10 rounded-full flex items-center justify-center mx-auto border-2 border-dashed border-blue-500/30 text-white text-center">
-                  <Timer className="w-12 h-12 text-blue-500 animate-pulse" />
+                <div className="w-32 h-32 bg-blue-600/10 rounded-full flex items-center justify-center mx-auto border-2 border-dashed border-blue-500/30 text-white">
+                  <Timer className="w-12 h-12 text-blue-500 animate-pulse text-white" />
                 </div>
                 <div className="text-white text-center">
                   <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase italic text-white text-center">Waiting for Draft</h2>
@@ -277,8 +293,8 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
            ) : draftState.is_finished ? (
              <div className="space-y-8 text-white text-center">
                 <div className="bg-slate-900 rounded-[3rem] border border-slate-800 p-12 text-center shadow-2xl text-white">
-                   <Trophy className="w-20 h-20 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_20px_rgba(234,179,8,0.3)]" />
-                   <h2 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase italic text-white text-center">Draft Concluded</h2>
+                   <Trophy className="w-20 h-20 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_20px_rgba(234,179,8,0.3)] text-white" />
+                   <h2 className="text-4xl font-black mb-2 tracking-tighter uppercase italic text-white text-center">Draft Concluded</h2>
                    <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.3em] text-white text-center">Official 2026 World Cup Rosters Set</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-white text-center">
@@ -286,7 +302,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
                      const pRoster = teams.filter(t => t.picked_by_id === p.id)
                      return (
                        <div key={p.id} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-6 shadow-xl text-white text-center">
-                          <h3 className="font-black text-blue-500 uppercase tracking-widest text-[10px] mb-6 pb-4 border-b border-slate-800 flex justify-between items-center text-white">
+                          <h3 className="font-black text-blue-500 uppercase tracking-widest text-[10px] mb-6 pb-4 border-b border-slate-800 flex justify-between items-center text-white text-left">
                             {p.name} <span className="text-white">{pRoster.length}/8 Teams</span>
                           </h3>
                           <div className="grid grid-cols-2 gap-3 text-white text-center">
@@ -329,13 +345,13 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         </div>
 
         <div className="col-span-12 lg:col-span-3 text-white text-center">
-          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl sticky top-24 text-white text-center">
+          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl sticky top-24 text-white">
              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-8 flex justify-between items-center text-white text-center">Live Feed <Bell className="w-3 h-3 text-blue-500 animate-pulse text-white"/></div>
              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-3 custom-scrollbar text-white">
                {pickHistory.map(t => (
-                 <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={t.id} className="flex items-center gap-4 p-5 bg-slate-800/30 rounded-3xl border border-slate-800/50 text-white">
+                 <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={t.id} className="flex items-center gap-4 p-5 bg-slate-800/30 rounded-3xl border border-slate-800/50 text-white text-left">
                     <span className="text-3xl">{t.flag_emoji}</span>
-                    <div className="flex-1 min-w-0 text-white text-left">
+                    <div className="flex-1 min-w-0 text-white">
                       <p className="text-[9px] font-black text-blue-500 uppercase mb-1.5 text-white">{players.find(p => p.id === t.picked_by_id)?.name}</p>
                       <p className="text-xs font-black uppercase tracking-tighter truncate text-white">{t.name}</p>
                     </div>
@@ -352,106 +368,61 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         {showAdminPanel && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAdminPanel(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110]" />
-            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-950 border-l border-slate-800 z-[120] p-8 overflow-y-auto shadow-2xl">
-              <div className="flex justify-between items-center mb-10">
+            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-950 border-l border-slate-800 z-[120] p-8 overflow-y-auto shadow-2xl text-white">
+              <div className="flex justify-between items-center mb-10 text-white">
                 <h2 className="text-2xl font-black uppercase tracking-tighter text-white">Commissioner</h2>
-                <button onClick={() => setShowAdminPanel(false)} className="p-3 hover:bg-slate-900 rounded-2xl border border-slate-800 text-white text-center"><X/></button>
+                <button onClick={() => setShowAdminPanel(false)} className="p-3 hover:bg-slate-900 rounded-2xl border border-slate-800 text-white text-center text-white"><X className="text-white"/></button>
               </div>
 
               <div className="space-y-10 text-white">
                 {!draftState?.is_started ? (
-                  <section className="bg-blue-600/10 border-2 border-dashed border-blue-500/30 p-8 rounded-[2.5rem] text-center">
+                  <section className="bg-blue-600/10 border-2 border-dashed border-blue-500/30 p-8 rounded-[2.5rem] text-center text-white">
                     <button onClick={() => updateDraftState({ is_started: true })} disabled={!isOrderValid} className="w-full py-6 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-white font-black rounded-3xl flex items-center justify-center gap-3 shadow-2xl uppercase tracking-widest transition-all">
-                      <PlayCircle className="w-8 h-8" /> Start Draft
+                      <PlayCircle className="w-8 h-8 text-white" /> Start Draft
                     </button>
                   </section>
                 ) : (
-                  <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 text-center">
-                    <div className="grid grid-cols-2 gap-4">
-                      <button onClick={() => updateDraftState({ is_paused: !draftState?.is_paused })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs">
-                        {draftState?.is_paused ? <Play className="mx-auto mb-1 text-white" /> : <Pause className="mx-auto mb-1 text-white" />} {draftState?.is_paused ? "Resume" : "Pause"}
+                  <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 text-center text-white">
+                    <div className="grid grid-cols-2 gap-4 text-white">
+                      <button onClick={() => updateDraftState({ is_paused: !draftState?.is_paused })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs text-white flex flex-col items-center">
+                        {draftState?.is_paused ? <Play className="mb-1 text-white" /> : <Pause className="mb-1 text-white" />} {draftState?.is_paused ? "Resume" : "Pause"}
                       </button>
-                      <button onClick={() => updateDraftState({ is_finished: !draftState?.is_finished })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs">
-                        <Lock className="mx-auto mb-1 text-white" /> {draftState?.is_finished ? "Unlock" : "End Draft"}
+                      <button onClick={() => updateDraftState({ is_finished: !draftState?.is_finished })} className="p-4 bg-slate-800 rounded-2xl border border-slate-700 font-bold uppercase text-xs text-white flex flex-col items-center">
+                        <Lock className="mb-1 text-white" /> {draftState?.is_finished ? "Unlock" : "End Draft"}
                       </button>
                     </div>
                   </section>
                 )}
 
-                <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                           <Power className={cn("w-5 h-5", draftState?.auto_fetch_results ? "text-green-500" : "text-slate-600")} />
-                           <div>
-                              <h3 className="text-[10px] font-black uppercase text-white tracking-widest">Auto Result Fetching</h3>
-                              <p className="text-[8px] text-slate-500 uppercase font-bold">Poll results every 15m</p>
-                           </div>
-                        </div>
-                        <button 
-                           onClick={() => updateDraftState({ auto_fetch_results: !draftState?.auto_fetch_results })}
-                           className={cn(
-                             "w-12 h-6 rounded-full transition-all relative p-1",
-                             draftState?.auto_fetch_results ? "bg-green-600" : "bg-slate-700"
-                           )}
-                        >
-                           <div className={cn(
-                             "w-4 h-4 bg-white rounded-full transition-all shadow-md",
-                             draftState?.auto_fetch_results ? "translate-x-6" : "translate-x-0"
-                           )} />
-                        </button>
-                    </div>
-                </section>
-
-                {/* WILDCARD WINNERS MANAGER */}
-                <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 space-y-6">
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                      <Star className="w-4 h-4 text-wc-gold" /> Set Wildcard Winners
+                <section className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 space-y-6 text-white">
+                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 text-white">
+                      <Star className="w-4 h-4 text-wc-gold text-white" /> Set Wildcard Winners
                    </h3>
-                   <div className="space-y-4">
-                      <div className="space-y-1.5">
-                         <label className="text-[8px] font-black text-slate-500 uppercase">Golden Boot</label>
-                         <input 
-                           value={wildcardWinners.golden_boot || ''} 
-                           onChange={(e) => setWildcardWinners({...wildcardWinners, golden_boot: e.target.value})}
-                           placeholder="Winner name..."
-                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
-                         />
+                   <div className="space-y-4 text-white">
+                      <div className="space-y-1.5 text-white">
+                         <label className="text-[8px] font-black text-slate-500 uppercase text-left block text-white">Golden Boot</label>
+                         <input value={wildcardWinners.golden_boot || ''} onChange={(e) => setWildcardWinners({...wildcardWinners, golden_boot: e.target.value})} placeholder="Winner name..." className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold text-white" />
                       </div>
-                      <div className="space-y-1.5">
-                         <label className="text-[8px] font-black text-slate-500 uppercase">Golden Glove</label>
-                         <input 
-                           value={wildcardWinners.golden_glove || ''} 
-                           onChange={(e) => setWildcardWinners({...wildcardWinners, golden_glove: e.target.value})}
-                           placeholder="Winner name..."
-                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
-                         />
+                      <div className="space-y-1.5 text-white">
+                         <label className="text-[8px] font-black text-slate-500 uppercase text-left block text-white">Golden Glove</label>
+                         <input value={wildcardWinners.golden_glove || ''} onChange={(e) => setWildcardWinners({...wildcardWinners, golden_glove: e.target.value})} placeholder="Winner name..." className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold text-white" />
                       </div>
-                      <div className="space-y-1.5">
-                         <label className="text-[8px] font-black text-slate-500 uppercase">Tournament MVP</label>
-                         <input 
-                           value={wildcardWinners.mvp || ''} 
-                           onChange={(e) => setWildcardWinners({...wildcardWinners, mvp: e.target.value})}
-                           placeholder="Winner name..."
-                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold"
-                         />
+                      <div className="space-y-1.5 text-white">
+                         <label className="text-[8px] font-black text-slate-500 uppercase text-left block text-white">Tournament MVP</label>
+                         <input value={wildcardWinners.mvp || ''} onChange={(e) => setWildcardWinners({...wildcardWinners, mvp: e.target.value})} placeholder="Winner name..." className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-wc-gold text-white" />
                       </div>
-                      <button 
-                        onClick={saveWildcardWinners}
-                        className="w-full py-3 bg-wc-gold text-wc-blue font-black rounded-xl text-[10px] uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all"
-                      >
-                         Save Winners
-                      </button>
+                      <button onClick={saveWildcardWinners} className="w-full py-3 bg-wc-gold text-wc-blue font-black rounded-xl text-[10px] uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all text-wc-blue">Save Winners</button>
                    </div>
                 </section>
 
                 {!draftState?.is_started && (
-                  <section>
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">Draft Order</h3>
-                    <div className="space-y-3">
+                  <section className="text-white">
+                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 text-left text-white">Draft Order</h3>
+                    <div className="space-y-3 text-white">
                       {players.map(p => (
-                        <div key={p.id} className="flex items-center gap-4 bg-slate-900 p-4 rounded-3xl border border-slate-800">
+                        <div key={p.id} className="flex items-center gap-4 bg-slate-900 p-4 rounded-3xl border border-slate-800 text-white">
                           <span className="font-bold flex-1 text-white text-left">{p.name}</span>
-                          <div className="flex gap-1">
+                          <div className="flex gap-1 text-white">
                             {[1,2,3,4].map(num => (
                               <button key={num} onClick={() => setPlayerOrder(p.id, num)} className={cn("w-8 h-8 rounded-lg text-xs font-black", p.draft_order === num ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-500")}>{num}</button>
                             ))}
@@ -462,9 +433,9 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
                   </section>
                 )}
 
-                <section className="pt-10 border-t border-slate-800 text-center">
+                <section className="pt-10 border-t border-slate-800 text-center text-white">
                   <button onClick={resetDraft} className="w-full p-5 bg-red-600/5 text-red-500 hover:bg-red-600 hover:text-white rounded-3xl font-black uppercase tracking-[0.2em] text-[10px] border border-red-500/20 transition-all flex items-center justify-center gap-3">
-                    <RefreshCcw className="w-4 h-4" /> Hard Reset
+                    <RefreshCcw className="w-4 h-4 text-red-500" /> Hard Reset
                   </button>
                 </section>
               </div>
@@ -473,9 +444,10 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
         )}
       </AnimatePresence>
 
+      {/* CONFIRMATION OVERLAY */}
       <AnimatePresence>
         {selectedTeam && isMyTurn && (
-          <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-4 md:p-10 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent text-white">
+          <motion.div initial={{ y: 200, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 200, opacity: 0 }} className="fixed bottom-0 left-0 right-0 z-[100] p-4 md:p-10 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent text-white text-white">
             <div className="max-w-3xl mx-auto bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col md:flex-row items-center justify-between border-2 border-blue-400 gap-6 md:gap-8 text-white">
               <div className="flex items-center gap-4 md:gap-8 text-white w-full md:w-auto text-white">
                 <span className="text-5xl md:text-7xl text-white">{selectedTeam.flag_emoji}</span>
@@ -486,7 +458,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
               </div>
               <div className="flex gap-3 md:gap-4 w-full md:w-auto text-white">
                 <button onClick={() => setSelectedTeam(null)} className="flex-1 md:flex-none w-auto md:w-20 h-14 md:h-20 bg-blue-800 rounded-[1rem] md:rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all text-white"><X className="w-6 h-6 md:w-8 h-8 text-white"/></button>
-                <button onClick={confirmPick} disabled={isConfirming} className="flex-[3] md:flex-none px-6 md:px-14 h-14 md:h-20 bg-white text-blue-600 font-black rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center gap-2 md:gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-sm md:text-xl uppercase tracking-tighter">
+                <button onClick={confirmPick} disabled={isConfirming} className="flex-[3] md:flex-none px-6 md:px-14 h-14 md:h-20 bg-white text-blue-600 font-black rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center gap-2 md:gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-sm md:text-xl uppercase tracking-tighter text-white">
                   {isConfirming ? <RefreshCcw className="animate-spin w-5 h-5 md:w-8 h-8" /> : <ShieldCheck className="w-5 h-5 md:w-8 h-8" />} 
                   <span>Confirm Pick</span>
                 </button>
