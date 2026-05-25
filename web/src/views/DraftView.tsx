@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, Play, Plus, Minus, Power, Star } from 'lucide-react'
+import { Trophy, Timer, RefreshCcw, X, Bell, Zap, Settings, Pause, ShieldCheck, PlayCircle, Lock, Play, Power, Star } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -36,18 +36,6 @@ interface DraftState {
   auto_fetch_results: boolean
 }
 
-interface Match {
-  id: number
-  team_a_id: number
-  team_b_id: number
-  stage: string
-  status: string
-  score_a: number
-  score_b: number
-  team_a?: { name: string, flag_emoji: string }
-  team_b?: { name: string, flag_emoji: string }
-}
-
 interface WildcardWinners {
   golden_boot: string | null
   golden_glove: string | null
@@ -63,7 +51,6 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
   const [players, setPlayers] = useState<Player[]>([])
   const [teams, setTeams] = useState<Team[]>([])
   const [draftState, setDraftState] = useState<DraftState | null>(null)
-  const [matches, setMatches] = useState<Match[]>([])
   const [wildcardWinners, setWildcardWinners] = useState<WildcardWinners>({ golden_boot: '', golden_glove: '', mvp: '' })
   const [loading, setLoading] = useState(true)
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
@@ -75,7 +62,6 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
       try {
         await fetchPlayers()
         await refreshData()
-        await fetchMatches()
         await fetchWildcardWinners()
       } finally {
         setLoading(false)
@@ -83,11 +69,10 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     }
     init()
 
-    const channel = supabase.channel('draft-view-sync-all')
+    const channel = supabase.channel('draft-view-sync-simple')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_state' }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => fetchPlayers())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchMatches())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_winners' }, () => fetchWildcardWinners())
       .subscribe()
 
@@ -106,15 +91,6 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     if (teamData) setTeams(teamData)
     const { data: stateData } = await supabase.from('draft_state').select('*').single()
     if (stateData) setDraftState(stateData)
-  }
-
-  const fetchMatches = async () => {
-    const { data } = await supabase.from('matches').select(`
-        *,
-        team_a:team_a_id(name, flag_emoji),
-        team_b:team_b_id(name, flag_emoji)
-    `).order('kickoff_time')
-    if (data) setMatches(data as any)
   }
 
   const fetchWildcardWinners = async () => {
@@ -156,7 +132,6 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     setIsConfirming(false)
   }
 
-  // ADMIN ACTIONS
   const updateDraftState = async (updates: Partial<DraftState>) => {
     await supabase.from('draft_state').update(updates).eq('id', 1)
     refreshData()
@@ -168,26 +143,34 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
     await fetchPlayers()
   }
 
-  const setTeamStatus = async (teamId: number, status: string) => {
-    await supabase.from('teams').update({ status }).eq('id', teamId)
-    refreshData()
-  }
-
-  const updateMatch = async (matchId: number, updates: Partial<Match>) => {
-    await supabase.from('matches').update(updates).eq('id', matchId)
-    fetchMatches()
-  }
-
   const saveWildcardWinners = async () => {
     await supabase.from('wildcard_winners').update(wildcardWinners).eq('id', 1)
   }
 
   const resetDraft = async () => {
-    if (!window.confirm('🚨 RESET EVERYTHING?')) return
-    await supabase.from('teams').update({ is_picked: false, picked_by_id: null, pick_number: null, status: 'active' }).neq('id', 0)
-    await supabase.from('draft_state').update({ current_pick_number: 1, is_paused: false, is_finished: false, is_started: false, auto_fetch_results: false }).eq('id', 1)
-    await supabase.from('matches').update({ status: 'scheduled', score_a: 0, score_b: 0 }).neq('id', 0)
-    await supabase.from('wildcard_winners').update({ golden_boot: null, golden_glove: null, mvp: null }).eq('id', 1)
+    if (!window.confirm('🚨 RESET EVERYTHING? All picks and wildcard winners will be cleared.')) return
+    
+    await supabase.from('teams').update({ 
+      is_picked: false, 
+      picked_by_id: null, 
+      pick_number: null, 
+      status: 'active' 
+    }).neq('id', 0)
+    
+    await supabase.from('draft_state').update({ 
+      current_pick_number: 1, 
+      is_paused: false, 
+      is_finished: false, 
+      is_started: false, 
+      auto_fetch_results: false 
+    }).eq('id', 1)
+    
+    await supabase.from('wildcard_winners').update({ 
+      golden_boot: null, 
+      golden_glove: null, 
+      mvp: null 
+    }).eq('id', 1)
+    
     refreshData()
   }
 
@@ -265,6 +248,7 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
               })}
             </div>
           </div>
+          
           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl text-white text-center">
              <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-6 uppercase">My Roster ({myRoster.length}/8)</h2>
              <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 text-white">
@@ -457,67 +441,6 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
                       >
                          Save Winners
                       </button>
-                   </div>
-                </section>
-
-                <section>
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 text-left">Match Simulator</h3>
-                   <div className="space-y-3">
-                      {matches.map(match => (
-                        <div key={match.id} className="bg-slate-900 p-4 rounded-3xl border border-slate-800 space-y-4">
-                           <div className="flex justify-between items-center text-[8px] font-black uppercase text-slate-600">
-                              <span>{match.stage}</span>
-                              <span className={cn(match.status === 'live' ? 'text-red-500 animate-pulse' : '')}>{match.status}</span>
-                           </div>
-                           <div className="flex items-center justify-between gap-4">
-                              <div className="flex-1 flex flex-col items-center gap-1">
-                                 <span className="text-xl">{match.team_a?.flag_emoji}</span>
-                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => updateMatch(match.id, { score_a: Math.max(0, match.score_a - 1) })} className="p-1 bg-slate-800 rounded-md text-white"><Minus className="w-3 h-3"/></button>
-                                    <span className="text-xl font-black text-white">{match.score_a}</span>
-                                    <button onClick={() => updateMatch(match.id, { score_a: match.score_a + 1 })} className="p-1 bg-slate-800 rounded-md text-white"><Plus className="w-3 h-3"/></button>
-                                 </div>
-                              </div>
-                              <div className="text-slate-700 font-black">VS</div>
-                              <div className="flex-1 flex flex-col items-center gap-1">
-                                 <span className="text-xl">{match.team_b?.flag_emoji}</span>
-                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => updateMatch(match.id, { score_b: Math.max(0, match.score_b - 1) })} className="p-1 bg-slate-800 rounded-md text-white"><Minus className="w-3 h-3"/></button>
-                                    <span className="text-xl font-black text-white">{match.score_b}</span>
-                                    <button onClick={() => updateMatch(match.id, { score_b: match.score_b + 1 })} className="p-1 bg-slate-800 rounded-md text-white"><Plus className="w-3 h-3"/></button>
-                                 </div>
-                              </div>
-                           </div>
-                           <div className="flex gap-2">
-                              <button onClick={() => updateMatch(match.id, { status: 'live' })} className="flex-1 py-2 bg-red-600/10 text-red-500 rounded-xl text-[8px] font-black uppercase border border-red-500/20">Go Live</button>
-                              <button onClick={() => updateMatch(match.id, { status: 'finished' })} className="flex-1 py-2 bg-slate-800 text-slate-400 rounded-xl text-[8px] font-black uppercase border border-slate-700">Finish</button>
-                           </div>
-                        </div>
-                      ))}
-                   </div>
-                </section>
-
-                <section>
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 text-left">Set Team Status</h3>
-                   <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                      {teams.filter(t => t.is_picked).map(t => (
-                        <div key={t.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
-                           <span className="text-[10px] font-black uppercase truncate w-24 text-left">{t.name}</span>
-                           <select value={t.status} onChange={(e) => setTeamStatus(t.id, e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg text-[9px] p-1 text-white">
-                              <option value="active">Active</option>
-                              <option value="group_1st">1st</option>
-                              <option value="group_2nd">2nd</option>
-                              <option value="group_3rd_adv">3rd (Adv)</option>
-                              <option value="not_advancing_3rd">3rd (Out)</option>
-                              <option value="not_advancing_4th">4th</option>
-                              <option value="r32_win">R32</option>
-                              <option value="r16_win">R16</option>
-                              <option value="qf_win">QF</option>
-                              <option value="sf_win">SF</option>
-                              <option value="final_win">Champ</option>
-                           </select>
-                        </div>
-                      ))}
                    </div>
                 </section>
 
