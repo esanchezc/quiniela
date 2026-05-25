@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
-import { Trophy, RefreshCcw, LogOut, LayoutDashboard, Calendar } from 'lucide-react'
+import { Trophy, RefreshCcw, LogOut } from 'lucide-react'
 import { DraftView } from './views/DraftView'
 import { RulesView } from './views/RulesView'
 import { LeaderboardView } from './views/LeaderboardView'
