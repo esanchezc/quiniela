@@ -16,7 +16,7 @@ function App() {
   const [player, setPlayer] = useState<Player | null>(null)
   const [activeTab, setActiveTab] = useState('draft') // Default to draft during tournament prep
   const [loading, setLoading] = useState(true)
-  const [draftState, setDraftState] = useState<{is_started: boolean, is_finished: boolean}>({
+  const [, setDraftState] = useState<{is_started: boolean, is_finished: boolean}>({
     is_started: false,
     is_finished: false
   })
@@ -35,7 +35,6 @@ function App() {
         const { data: stateData } = await supabase.from('draft_state').select('is_started, is_finished').single()
         if (stateData) {
             setDraftState(stateData)
-            // If the draft is finished, default to leaderboard. Otherwise, default to draft.
             if (stateData.is_finished) {
               setActiveTab('leaderboard')
             } else {
@@ -75,18 +74,17 @@ function App() {
   )
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-32">
-      {/* GLOBAL HEADER */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-32 text-white">
       <nav className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 text-white">
             <Trophy className="text-blue-500 w-8 h-8 drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-            <h1 className="text-xl font-black tracking-tighter uppercase text-white">Quiniela <span className="text-blue-500">2026</span></h1>
+            <h1 className="text-xl font-black tracking-tighter uppercase text-white">Quiniela <span className="text-blue-500 text-white">2026</span></h1>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 text-white">
             {player ? (
-              <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 shadow-inner">
+              <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 shadow-inner text-white">
                 <span className="font-bold text-sm text-white">{player.name}</span>
                 <button onClick={() => window.location.href = window.location.pathname} className="text-slate-500 hover:text-white transition-colors">
                   <LogOut className="w-4 h-4"/>
@@ -99,22 +97,18 @@ function App() {
         </div>
       </nav>
 
-      {/* VIEW CONTENT */}
-      <div className="animate-in fade-in duration-500">
+      <div className="animate-in fade-in duration-500 text-white">
         {activeTab === 'draft' && <DraftView player={player} isAdmin={isAdmin} />}
-        
         {activeTab === 'rules' && <RulesView player={player} isAdmin={isAdmin} />}
-        
         {activeTab === 'leaderboard' && (
-          <div className="max-w-4xl mx-auto p-12 text-center space-y-6">
+          <div className="max-w-4xl mx-auto p-12 text-center space-y-6 text-white">
             <LayoutDashboard className="w-16 h-16 text-slate-700 mx-auto" />
             <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Leaderboard</h2>
             <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Rankings will unlock once the tournament begins.</p>
           </div>
         )}
-
         {activeTab === 'matches' && (
-          <div className="max-w-4xl mx-auto p-12 text-center space-y-6">
+          <div className="max-w-4xl mx-auto p-12 text-center space-y-6 text-white">
             <Calendar className="w-16 h-16 text-slate-700 mx-auto" />
             <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Match Center</h2>
             <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">The World Cup 2026 schedule is arriving soon.</p>
@@ -122,12 +116,7 @@ function App() {
         )}
       </div>
 
-      {/* NAVIGATION */}
-      <Navigation 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        showDraft={true} 
-      />
+      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} showDraft={true} />
     </div>
   )
 }
