@@ -456,10 +456,10 @@ export function DraftView({ player, isAdmin }: DraftViewProps) {
                   <h3 className="text-2xl md:text-4xl font-black italic tracking-tighter uppercase leading-none text-white text-left">{selectedTeam.name}</h3>
                 </div>
               </div>
-              <div className="flex gap-3 md:gap-4 w-full md:w-auto text-white">
-                <button onClick={() => setSelectedTeam(null)} className="flex-1 md:flex-none w-auto md:w-20 h-14 md:h-20 bg-blue-800 rounded-[1rem] md:rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all text-white"><X className="w-6 h-6 md:w-8 h-8 text-white"/></button>
-                <button onClick={confirmPick} disabled={isConfirming} className="flex-[3] md:flex-none px-6 md:px-14 h-14 md:h-20 bg-white text-blue-600 font-black rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center gap-2 md:gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-sm md:text-xl uppercase tracking-tighter text-white">
-                  {isConfirming ? <RefreshCcw className="animate-spin w-5 h-5 md:w-8 h-8" /> : <ShieldCheck className="w-5 h-5 md:w-8 h-8" />} 
+              <div className="flex gap-3 md:gap-4 w-full md:w-auto">
+                <button onClick={() => setSelectedTeam(null)} className="flex-1 md:flex-none w-auto md:w-20 h-14 md:h-20 bg-blue-800 rounded-[1rem] md:rounded-[1.5rem] text-white flex items-center justify-center hover:bg-blue-900 transition-all active:scale-95"><X className="w-6 h-6 md:w-8 h-8"/></button>
+                <button onClick={confirmPick} disabled={isConfirming} className="flex-[3] md:flex-none px-6 md:px-14 h-14 md:h-20 bg-white text-blue-600 font-black rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center gap-2 md:gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-2xl text-sm md:text-xl uppercase tracking-tighter">
+                  {isConfirming ? <RefreshCcw className="animate-spin w-5 h-5 md:w-8 h-8 text-blue-600" /> : <ShieldCheck className="w-5 h-5 md:w-8 h-8 text-blue-600" />} 
                   <span>Confirm Pick</span>
                 </button>
               </div>
