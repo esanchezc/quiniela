@@ -27,32 +27,20 @@ const normalizeName = (name: string | null) => {
   return TEAM_NAME_MAP[clean] || clean
 }
 
-// Resilient fetch with retry logic for 502s or network blips
-async function fetchWithRetry(url: string, retries = 3): Promise<any> {
+async function fetchWithRetry(url: string, retries = 2): Promise<any> {
   try {
     const response = await fetch(url)
-    
-    if (response.status === 429) throw new Error('FIFA API rate limit hit. Wait 1 minute.')
-    
-    // If we get a 502 or other server error, retry
+    if (response.status === 429) throw new Error('API limit hit.')
     if (!response.ok) {
         if (retries > 0 && [500, 502, 503, 504].includes(response.status)) {
-            console.warn(`API responded with ${response.status}. Retrying... (${retries} left)`)
             await new Promise(res => setTimeout(res, 2000))
             return fetchWithRetry(url, retries - 1)
         }
-        throw new Error(`FIFA API Error: ${response.status} ${response.statusText}`)
+        throw new Error(`API Error: ${response.status}`)
     }
-
-    const contentType = response.headers.get("content-type")
-    if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("API returned invalid data format (not JSON)")
-    }
-
     return response.json()
   } catch (err: any) {
     if (retries > 0) {
-        console.warn(`Connection error. Retrying... (${retries} left)`)
         await new Promise(res => setTimeout(res, 2000))
         return fetchWithRetry(url, retries - 1)
     }
@@ -63,14 +51,13 @@ async function fetchWithRetry(url: string, retries = 3): Promise<any> {
 export const syncTournamentData = async () => {
   try {
     const { data: localTeams } = await supabase.from('teams').select('id, name')
-    if (!localTeams) throw new Error("Could not fetch local teams")
+    if (!localTeams) throw new Error("No teams")
 
     const findLocalTeamId = (apiName: string | null) => {
       const target = normalizeName(apiName).toLowerCase()
       return localTeams.find(t => t.name.toLowerCase() === target || t.name.toLowerCase().includes(target))?.id
     }
 
-    // Use the new retry-enabled fetcher
     const [standingsData, matchesData] = await Promise.all([
       fetchWithRetry(`${API_BASE}/competitions/WC/standings`),
       fetchWithRetry(`${API_BASE}/competitions/WC/matches`)
@@ -78,7 +65,7 @@ export const syncTournamentData = async () => {
 
     const today = new Date().toDateString()
 
-    // 1. Process Matches
+    // 1. Update Matches
     if (matchesData.matches) {
       const activeMatches = matchesData.matches.filter((m: any) => {
         const isLive = m.status === 'IN_PLAY' || m.status === 'LIVE' || m.status === 'PAUSED'
@@ -89,7 +76,6 @@ export const syncTournamentData = async () => {
       for (const m of activeMatches) {
         const teamAId = findLocalTeamId(m.homeTeam.name)
         const teamBId = findLocalTeamId(m.awayTeam.name)
-
         if (teamAId && teamBId) {
           await supabase.from('matches')
             .update({
@@ -98,13 +84,12 @@ export const syncTournamentData = async () => {
               status: m.status.toLowerCase() === 'finished' ? 'finished' : 
                       (m.status === 'IN_PLAY' || m.status === 'PAUSED') ? 'live' : 'scheduled'
             })
-            .eq('team_a_id', teamAId)
-            .eq('team_b_id', teamBId)
+            .eq('team_a_id', teamAId).eq('team_b_id', teamBId)
         }
       }
     }
 
-    // 2. Update Team Status from Standings
+    // 2. Update Standings
     if (standingsData.standings) {
         for (const group of standingsData.standings) {
             if (group.type !== 'TOTAL') continue
@@ -116,18 +101,17 @@ export const syncTournamentData = async () => {
                     else if (entry.position === 2) status = 'group_2nd'
                     else if (entry.position === 3) status = 'group_3rd_adv'
                     else if (entry.position === 4) status = 'not_advancing_4th'
-                    
                     await supabase.from('teams').update({ status }).eq('id', teamId)
-                } else if (teamId) {
-                    await supabase.from('teams').update({ status: 'active' }).eq('id', teamId)
                 }
             }
         }
     }
 
+    // 3. Mark the sync time in DB
+    await supabase.from('draft_state').update({ last_api_sync: new Date().toISOString() }).eq('id', 1)
+
     return { success: true }
   } catch (err: any) {
-    console.error('FIFA Sync Error:', err.message)
     return { error: err.message }
   }
 }

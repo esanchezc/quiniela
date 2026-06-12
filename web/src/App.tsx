@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
+import { syncTournamentData } from './lib/fifaApi'
 import { Trophy, RefreshCcw, LogOut } from 'lucide-react'
 import { DraftView } from './views/DraftView'
 import { RulesView } from './views/RulesView'
@@ -34,13 +35,23 @@ function App() {
           if (data) setPlayer(data)
         }
         
-        const { data: stateData } = await supabase.from('draft_state').select('is_started, is_finished').single()
+        const { data: stateData } = await supabase.from('draft_state').select('*').single()
         if (stateData) {
             setDraftState(stateData)
             if (stateData.is_finished) {
               setActiveTab('leaderboard')
             } else {
               setActiveTab('draft')
+            }
+
+            // COOPERATIVE SYNC LOGIC
+            const lastSync = stateData.last_api_sync ? new Date(stateData.last_api_sync).getTime() : 0
+            const now = new Date().getTime()
+            const fiveMinutes = 5 * 60 * 1000
+
+            if (now - lastSync > fiveMinutes) {
+                console.log("Cooperative Sync: Data is old. Triggering background refresh...")
+                syncTournamentData() // Run in background, don't await to avoid blocking UI
             }
         }
       } finally {
@@ -69,7 +80,7 @@ function App() {
   const isAdmin = new URLSearchParams(window.location.search).get('admin') === 'true'
 
   if (loading) return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-blue-500 text-white">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-blue-500">
       <RefreshCcw className="w-12 h-12 animate-spin mb-4" />
       <p className="font-black tracking-widest animate-pulse uppercase text-xs">Entering Stadium...</p>
     </div>
@@ -81,25 +92,25 @@ function App() {
         <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Trophy className="text-blue-500 w-8 h-8 drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-            <h1 className="text-xl font-black tracking-tighter uppercase text-white">Quiniela <span className="text-blue-500 text-white">2026</span></h1>
+            <h1 className="text-xl font-black tracking-tighter uppercase text-white text-white">Quiniela <span className="text-blue-500">2026</span></h1>
           </div>
 
-          <div className="flex items-center gap-4 text-white">
+          <div className="flex items-center gap-4">
             {player ? (
-              <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 shadow-inner text-white">
+              <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-2xl border border-slate-700 shadow-inner">
                 <span className="font-bold text-sm text-white">{player.name}</span>
                 <button onClick={() => window.location.href = window.location.pathname} className="text-slate-500 hover:text-white transition-colors">
                   <LogOut className="w-4 h-4"/>
                 </button>
               </div>
             ) : (
-              <span className="text-amber-500 text-[10px] font-black tracking-widest uppercase bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">Read-Only</span>
+              <span className="text-amber-500 text-[10px] font-black tracking-widest uppercase bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 text-white">Read-Only</span>
             )}
           </div>
         </div>
       </nav>
 
-      <div className="animate-in fade-in duration-500 text-white">
+      <div className="animate-in fade-in duration-500 text-white text-white">
         {activeTab === 'leaderboard' && <LeaderboardView />}
         {activeTab === 'draft' && <DraftView player={player} isAdmin={isAdmin} />}
         {activeTab === 'rules' && <RulesView player={player} isAdmin={isAdmin} />}
