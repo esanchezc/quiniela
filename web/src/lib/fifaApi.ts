@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 
 const API_BASE = '/api-fifa'
+const API_KEY = import.meta.env.VITE_FIFA_API_KEY
 
 const TEAM_NAME_MAP: Record<string, string> = {
   'United States': 'USA',
@@ -29,7 +30,12 @@ const normalizeName = (name: string | null) => {
 
 async function fetchWithRetry(url: string, retries = 2): Promise<any> {
   try {
-    const response = await fetch(url)
+    const response = await fetch(url, {
+      headers: {
+        'X-Auth-Token': API_KEY || ''
+      }
+    })
+    
     if (response.status === 429) throw new Error('API limit hit.')
     if (!response.ok) {
         if (retries > 0 && [500, 502, 503, 504].includes(response.status)) {
@@ -49,6 +55,11 @@ async function fetchWithRetry(url: string, retries = 2): Promise<any> {
 }
 
 export const syncTournamentData = async () => {
+  if (!API_KEY) {
+    console.error("FIFA API Key missing in environment")
+    return { error: 'API Key missing' }
+  }
+
   try {
     const { data: localTeams } = await supabase.from('teams').select('id, name')
     if (!localTeams) throw new Error("No teams")
@@ -107,7 +118,6 @@ export const syncTournamentData = async () => {
         }
     }
 
-    // 3. Mark the sync time in DB
     await supabase.from('draft_state').update({ last_api_sync: new Date().toISOString() }).eq('id', 1)
 
     return { success: true }
