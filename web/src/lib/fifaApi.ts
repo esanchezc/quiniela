@@ -2,107 +2,133 @@ import { supabase } from './supabase'
 
 const API_BASE = '/api-fifa'
 
+// Defines a mapping for team names that differ between our DB and the API
 const TEAM_NAME_MAP: Record<string, string> = {
   'United States': 'USA', 'Korea Republic': 'South Korea', 'Republic of Korea': 'South Korea',
   'Turkey': 'Türkiye', 'Türkiye': 'Türkiye', 'Congo DR': 'DR Congo', 'DR Congo': 'DR Congo',
-  'Bosnia-Herzegovina': 'Bosnia and Herzegovina', 'Bosnia and Herzegovina': 'Bosnia and Herzegovina',
-  'Ivory Coast': "Côte d'Ivoire", "Côte d'Ivoire": "Côte d'Ivoire", 'Cape Verde Islands': 'Cabo Verde',
-  'Cabo Verde': 'Cabo Verde', 'Czech Republic': 'Czechia', 'Czechia': 'Czechia'
+  'Bosnia-Herzegovina': 'Bosnia and Herzegovina',
+  'Ivory Coast': "Côte d'Ivoire",
+  'Cape Verde Islands': 'Cabo Verde',
+  'Czech Republic': 'Czechia'
 }
 
-const normalizeName = (name: string | null) => {
+// Normalizes an API team name to match our database conventions
+const normalizeName = (name: string | null): string => {
   if (!name) return ''
   const clean = name.trim()
   return TEAM_NAME_MAP[clean] || clean
 }
 
-async function fetchWithRetry(url: string, retries = 2): Promise<any> {
+// Fetches data from the API with a retry mechanism for transient network errors
+async function fetchWithRetry(url: string, retries = 3): Promise<any> {
   try {
     const response = await fetch(url)
-    if (response.status === 429) throw new Error('API limit hit.')
+    if (response.status === 429) throw new Error('API rate limit hit.')
     if (!response.ok) {
-        if (retries > 0 && [500, 502, 503, 504].includes(response.status)) {
-            await new Promise(res => setTimeout(res, 2000)); return fetchWithRetry(url, retries - 1)
-        }
-        throw new Error(`API Error: ${response.status}`)
+      if (retries > 0 && [500, 502, 503, 504].includes(response.status)) {
+        await new Promise(res => setTimeout(res, 2500))
+        return fetchWithRetry(url, retries - 1)
+      }
+      throw new Error(`API Error: ${response.statusText} (${response.status})`)
     }
     return response.json()
   } catch (err: any) {
     if (retries > 0) {
-        await new Promise(res => setTimeout(res, 2000)); return fetchWithRetry(url, retries - 1)
+      await new Promise(res => setTimeout(res, 2500))
+      return fetchWithRetry(url, retries - 1)
     }
     throw err
   }
 }
 
+/**
+ * The master function to sync all tournament data from the FIFA API to our Supabase DB.
+ * It is designed to be idempotent and safe to run multiple times.
+ */
 export const syncTournamentData = async () => {
+  console.log("SYNC: Starting FIFA Data Sync...")
   try {
-    const { data: localTeams } = await supabase.from('teams').select('id, name')
-    if (!localTeams) throw new Error("Could not fetch local teams")
+    // 1. Fetch our local team roster to map API teams to our internal IDs
+    const { data: localTeams, error: dbError } = await supabase.from('teams').select('id, name')
+    if (dbError || !localTeams) throw new Error("Fatal: Could not fetch local teams from Supabase.")
+    console.log(`SYNC: Found ${localTeams.length} local teams.`)
 
-    const findLocalTeamId = (apiName: string | null) => localTeams.find(t => t.name.toLowerCase() === normalizeName(apiName).toLowerCase())?.id
+    const localTeamMap = new Map<string, number>()
+    localTeams.forEach(t => {
+      localTeamMap.set(normalizeName(t.name).toLowerCase(), t.id)
+    })
+    const findLocalTeamId = (apiName: string | null) => localTeamMap.get(normalizeName(apiName).toLowerCase())
 
+    // 2. Fetch the latest standings and full match schedule from the API
     const [standingsData, matchesData] = await Promise.all([
       fetchWithRetry(`${API_BASE}/competitions/WC/standings`),
       fetchWithRetry(`${API_BASE}/competitions/WC/matches`)
     ])
+    console.log("SYNC: Fetched latest standings and matches from API.")
 
-    const today = new Date().toDateString()
-
-    // 1. Get List of all teams advancing to Round of 32 from API data
+    // 3. Determine which 3rd place teams actually advanced to the Round of 32
     const advancingTeamApiIds = new Set<number>()
     if (matchesData.matches) {
-        const r32matches = matchesData.matches.filter((m: any) => m.stage === 'ROUND_OF_32');
-        for (const m of r32matches) {
-            if (m.homeTeam.id) advancingTeamApiIds.add(m.homeTeam.id)
-            if (m.awayTeam.id) advancingTeamApiIds.add(m.awayTeam.id)
-        }
+      matchesData.matches
+        .filter((m: any) => m.stage === 'LAST_32' && m.homeTeam.id && m.awayTeam.id)
+        .forEach((m: any) => {
+          advancingTeamApiIds.add(m.homeTeam.id)
+          advancingTeamApiIds.add(m.awayTeam.id)
+        })
     }
-    
-    // 2. Update Team Status from Standings
+    console.log(`SYNC: Identified ${advancingTeamApiIds.size} teams that advanced from 3rd place.`)
+
+    // 4. Process Group Stage results and assign accomplishments
     if (standingsData.standings) {
-        for (const group of standingsData.standings) {
-            if (group.type !== 'TOTAL') continue
-            for (const entry of group.table) {
-                const teamId = findLocalTeamId(entry.team.name)
-                // Only update if they've played
-                if (teamId && entry.playedGames > 0) {
-                    let status = 'active'
-                    if (entry.position === 1) status = 'group_1st'
-                    else if (entry.position === 2) status = 'group_2nd'
-                    else if (entry.position === 3) {
-                        // The critical fix: check against the actual R32 teams
-                        status = advancingTeamApiIds.has(entry.team.id) ? 'group_3rd_adv' : 'not_advancing_3rd'
-                    }
-                    else if (entry.position === 4) status = 'not_advancing_4th'
-                    await supabase.from('teams').update({ status }).eq('id', teamId)
-                }
+      console.log("SYNC: Processing Group Stage accomplishments...")
+      for (const group of standingsData.standings) {
+        if (group.type !== 'TOTAL' || !group.table) continue
+        for (const entry of group.table) {
+          const teamId = findLocalTeamId(entry.team.name)
+          if (teamId && entry.playedGames > 0) {
+            let accomplishment: string | null = null
+            if (entry.position === 1) accomplishment = 'group_1st'
+            else if (entry.position === 2) accomplishment = 'group_2nd'
+            else if (entry.position === 3) {
+              accomplishment = advancingTeamApiIds.has(entry.team.id) ? 'group_3rd_adv' : 'not_advancing_3rd'
+            } else if (entry.position === 4) accomplishment = 'not_advancing_4th'
+
+            if (accomplishment) {
+              await supabase.rpc('add_accomplishment', { team_id: teamId, new_accomplishment: accomplishment })
             }
+          }
         }
+      }
     }
 
-    // 3. Update Match Table for Today/Live
+    // 5. Process Knockout Stage results and assign accomplishments
     if (matchesData.matches) {
-      const activeMatches = matchesData.matches.filter((m: any) => new Date(m.utcDate).toDateString() === today || ['IN_PLAY', 'PAUSED'].includes(m.status))
-      for (const m of activeMatches) {
-        const teamAId = findLocalTeamId(m.homeTeam.name)
-        const teamBId = findLocalTeamId(m.awayTeam.name)
-        if (teamAId && teamBId) {
-          await supabase.from('matches')
-            .update({
-              score_a: m.score.fullTime.home ?? 0,
-              score_b: m.score.fullTime.away ?? 0,
-              status: m.status.toLowerCase() === 'finished' ? 'finished' : (m.status === 'IN_PLAY' || m.status === 'PAUSED') ? 'live' : 'scheduled'
-            })
-            .eq('team_a_id', teamAId).eq('team_b_id', teamBId)
+      console.log("SYNC: Processing Knockout Stage accomplishments...")
+      const knockoutStages = ['LAST_32', 'LAST_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'THIRD_PLACE', 'FINAL']
+      for (const stage of knockoutStages) {
+        const stageMatches = matchesData.matches.filter((m: any) => m.stage === stage && m.status === 'FINISHED')
+        for (const m of stageMatches) {
+          let winnerId: number | undefined, winnerName: string | undefined
+
+          if (m.score.winner === 'HOME_TEAM') {
+            winnerName = m.homeTeam.name; winnerId = findLocalTeamId(winnerName)
+          } else if (m.score.winner === 'AWAY_TEAM') {
+            winnerName = m.awayTeam.name; winnerId = findLocalTeamId(winnerName)
+          }
+
+          if (winnerId && winnerName) {
+            const accomplishment = `${stage.toLowerCase()}_win`
+            await supabase.rpc('add_accomplishment', { team_id: winnerId, new_accomplishment: accomplishment })
+          }
         }
       }
     }
 
     await supabase.from('draft_state').update({ last_api_sync: new Date().toISOString() }).eq('id', 1)
+    console.log("SYNC: Finished successfully.")
     return { success: true }
   } catch (err: any) {
-    console.error('FIFA Sync Error:', err.message)
+    console.error('SYNC: A fatal error occurred:', err.message)
     return { error: err.message }
   }
 }

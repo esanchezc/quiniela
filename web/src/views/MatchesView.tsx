@@ -43,7 +43,6 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
   const [loading, setLoading] = useState(true)
   const [activeStage, setActiveStage] = useState('Round 1')
   
-  // Admin Editing State
   const [editingMatchId, setEditingMatchId] = useState<number | null>(null)
   const [editScoreA, setEditScoreA] = useState(0)
   const [editScoreB, setEditScoreB] = useState(0)
@@ -58,7 +57,7 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
     }
     init()
 
-    const channel = supabase.channel('matches-realtime-v3')
+    const channel = supabase.channel('matches-view-live-final-v3')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchMatches())
       .subscribe()
 
@@ -117,7 +116,7 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
   return (
     <div className="max-w-[1200px] mx-auto p-4 md:p-8 space-y-10 pb-32 text-white">
       
-      {/* Header & Stage Filter */}
+      {/* Filters */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 border-b border-slate-800 pb-8 text-white">
         <div className="flex items-center gap-4 text-white text-center">
            <Calendar className="text-blue-500 w-8 h-8 text-white" />
@@ -133,7 +132,7 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
                className={cn(
                  "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border",
                  activeStage === stage 
-                   ? "bg-blue-600 border-blue-400 text-white shadow-lg shadow-blue-600/20" 
+                   ? "bg-blue-600 border-blue-400 text-white shadow-lg" 
                    : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-300"
                )}
              >
@@ -165,7 +164,6 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
                         "bg-slate-900/40 rounded-[2.5rem] border transition-all duration-500 overflow-hidden shadow-2xl relative group text-white",
                         isEditing ? "border-blue-500 bg-blue-500/5 ring-4 ring-blue-500/10" : "border-slate-800 hover:border-slate-700"
                     )}>
-                        {/* Admin Action */}
                         {isAdmin && !isEditing && (
                             <button onClick={() => startEditing(match)} className="absolute top-4 right-4 p-2 bg-slate-800/80 hover:bg-blue-600 rounded-xl text-slate-500 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20 shadow-xl text-white">
                                 <Edit2 className="w-4 h-4 text-white" />
@@ -198,7 +196,7 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
                                 )}
                             </div>
 
-                            {/* Center Score/Time Area */}
+                            {/* Center Area */}
                             <div className="col-span-4 flex flex-col items-center justify-center text-white">
                                 <AnimatePresence mode="wait">
                                     {isEditing ? (
@@ -223,19 +221,19 @@ export function MatchesView({ isAdmin }: MatchesViewProps) {
                                             {match.status === 'scheduled' ? (
                                                 <div className="text-center space-y-4 text-white">
                                                     <div className="text-2xl font-black italic text-blue-500 uppercase tracking-tighter opacity-50 text-white">VS</div>
-                                                    <div className="space-y-1 text-white">
+                                                    <div className="space-y-1 text-white text-center">
                                                        <div className="flex items-center gap-2 text-slate-100 text-sm font-black uppercase text-white justify-center">
                                                            <Clock className="w-4 h-4 text-blue-400 text-white" />
                                                            {matchDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                        </div>
-                                                       <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-white">
+                                                       <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-white text-center">
                                                            {matchDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
                                                        </div>
                                                     </div>
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col items-center gap-6 text-white text-center">
-                                                    <div className="flex items-center gap-6 md:gap-12 text-white">
+                                                    <div className="flex items-center gap-6 md:gap-12 text-white text-center">
                                                         <span className="text-5xl md:text-8xl font-black italic tracking-tighter text-white drop-shadow-xl text-center">{match.score_a}</span>
                                                         <span className="text-xl md:text-3xl font-black text-slate-800 italic text-white">-</span>
                                                         <span className="text-5xl md:text-8xl font-black italic tracking-tighter text-white drop-shadow-xl text-center">{match.score_b}</span>

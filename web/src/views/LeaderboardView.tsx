@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Trophy, RefreshCcw, TrendingUp, ChevronRight, Medal, Star } from 'lucide-react'
+import { Trophy, RefreshCcw, TrendingUp, ChevronRight, Medal } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -9,55 +9,14 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-interface Player {
-  id: string
-  name: string
-}
+// Interfaces (Team, Player, etc.) remain the same as before...
+interface Player { id: string; name: string; }
+interface Team { id: number; name: string; flag_emoji: string; picked_by_id: string | null; is_picked: boolean; is_redraft: boolean; accomplishments: string[] | null; }
+interface ScoringConfig { rule_name: string; points_value: number; }
+interface WildcardPicks { player_id: string; golden_boot_name: string; golden_glove_name: string; mvp_name: string; }
+interface WildcardWinners { golden_boot: string | null; golden_glove: string | null; mvp: string | null; }
+interface PlayerScore { player: Player; totalPoints: number; teamPoints: number; teamBreakdown: { team: Team; points: number; }[]; wildcardPoints: number; wildcardBreakdown: { category: string; pick: string; winner: string | null; points: number; }[]; }
 
-interface Team {
-  id: number
-  name: string
-  flag_emoji: string
-  picked_by_id: string | null
-  is_picked: boolean
-  is_redraft: boolean
-  status: string
-}
-
-interface ScoringConfig {
-  rule_name: string
-  points_value: number
-}
-
-interface WildcardPicks {
-  player_id: string
-  golden_boot_name: string
-  golden_glove_name: string
-  mvp_name: string
-}
-
-interface WildcardWinners {
-  golden_boot: string | null
-  golden_glove: string | null
-  mvp: string | null
-}
-
-interface PlayerScore {
-  player: Player
-  totalPoints: number
-  teamPoints: number
-  teamBreakdown: {
-    team: Team
-    points: number
-  }[]
-  wildcardPoints: number
-  wildcardBreakdown: {
-    category: string
-    pick: string
-    winner: string | null
-    points: number
-  }[]
-}
 
 export function LeaderboardView() {
   const [players, setPlayers] = useState<Player[]>([])
@@ -66,24 +25,26 @@ export function LeaderboardView() {
   const [allWildcardPicks, setAllWildcardPicks] = useState<WildcardPicks[]>([])
   const [wildcardWinners, setWildcardWinners] = useState<WildcardWinners | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
-    
-    const channel = supabase.channel('leaderboard-final-sync')
+    const channel = supabase.channel('leaderboard-final-sync-v2')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchData())
       .subscribe()
-
     return () => {
       supabase.removeChannel(channel)
     }
   }, [])
 
   const fetchData = async () => {
+    if (isInitialLoad) {
+      setLoading(true)
+    }
     const { data: pData } = await supabase.from('players').select('id, name')
     const { data: tData } = await supabase.from('teams').select('*')
-    const { data: cData } = await supabase.from('scoring_config').select('rule_name, points_value')
+    const { data: cData } = await supabase.from('scoring_config').select('*')
     const { data: wpData } = await supabase.from('wildcard_picks').select('*')
     const { data: wwData } = await supabase.from('wildcard_winners').select('*').single()
     
@@ -92,72 +53,53 @@ export function LeaderboardView() {
     if (cData) setConfig(cData)
     if (wpData) setAllWildcardPicks(wpData)
     if (wwData) setWildcardWinners(wwData)
-    setLoading(false)
+
+    if (isInitialLoad) {
+      setLoading(false)
+      setIsInitialLoad(false)
+    }
   }
 
   const scores: PlayerScore[] = useMemo(() => {
-    if (!players.length || !config.length) return []
-
+    if (loading || !players.length || !config.length) return []
     const getPoints = (rule: string) => config.find(c => c.rule_name === rule)?.points_value || 0
 
     return players.map(player => {
         const playerTeams = teams.filter(t => t.picked_by_id === player.id && t.is_picked)
         let teamPointsTotal = 0
-        
         const teamBreakdown = playerTeams.map(team => {
             let teamPoints = 0
-            const s = team.status || 'active'
-            
-            let groupPoints = 0
-            if (s === 'group_1st') groupPoints = getPoints('group_1st')
-            else if (s === 'group_2nd') groupPoints = getPoints('group_2nd')
-            else if (s === 'group_3rd_adv') groupPoints = getPoints('group_3rd_adv')
-            else if (s === 'not_advancing_3rd') groupPoints = getPoints('not_advancing_3rd')
-            else if (s === 'not_advancing_4th') groupPoints = getPoints('not_advancing_4th')
-
-            let knockoutPoints = 0
-            if (s === 'r32_win') knockoutPoints = getPoints('r32_win')
-            if (s === 'r16_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win')
-            if (s === 'qf_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win')
-            if (s === 'sf_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win') + getPoints('sf_win')
-            if (s === 'final_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win') + getPoints('sf_win') + getPoints('final_win')
-
-            // REDRAFT LOGIC
-            if (team.is_redraft) {
-                teamPoints = Math.ceil(knockoutPoints / 2) // Half points for redrafted teams, no group points
-            } else {
-                teamPoints = groupPoints + knockoutPoints
+            if (team.accomplishments) {
+                team.accomplishments.forEach(acc => {
+                    let pts = getPoints(acc)
+                    if (team.is_redraft && acc.includes('_win')) {
+                        teamPoints += Math.ceil(pts / 2)
+                    } else if (!team.is_redraft) {
+                        teamPoints += pts
+                    }
+                })
             }
-
             teamPointsTotal += teamPoints
             return { team, points: teamPoints }
         })
 
-        // Wildcard Logic
-        const playerPicks = allWildcardPicks.find(wp => wp.player_id === player.id)
         let playerWildcardPoints = 0
         const wildcardBreakdown: PlayerScore['wildcardBreakdown'] = []
-
+        const playerPicks = allWildcardPicks.find(wp => wp.player_id === player.id)
         if (playerPicks && wildcardWinners) {
             const categories = [
                 { id: 'golden_boot', name: 'Golden Boot', pick: playerPicks.golden_boot_name, winner: wildcardWinners.golden_boot },
                 { id: 'golden_glove', name: 'Golden Glove', pick: playerPicks.golden_glove_name, winner: wildcardWinners.golden_glove },
                 { id: 'mvp', name: 'MVP', pick: playerPicks.mvp_name, winner: wildcardWinners.mvp }
             ]
-
             categories.forEach(cat => {
                 if (!cat.winner) {
                     wildcardBreakdown.push({ category: cat.name, pick: cat.pick, winner: null, points: 0 })
                     return
                 }
-
                 const isCorrect = cat.pick?.trim().toLowerCase() === cat.winner?.trim().toLowerCase()
                 if (isCorrect) {
-                    const othersCorrect = allWildcardPicks.filter(wp => 
-                        wp.player_id !== player.id && 
-                        (wp as any)[`${cat.id}_name`]?.trim().toLowerCase() === cat.winner?.trim().toLowerCase()
-                    ).length
-
+                    const othersCorrect = allWildcardPicks.filter(wp => wp.player_id !== player.id && (wp as any)[`${cat.id}_name`]?.trim().toLowerCase() === cat.winner?.trim().toLowerCase()).length
                     const pts = othersCorrect === 0 ? getPoints('wildcard_sole_winner') : getPoints('wildcard_correct')
                     playerWildcardPoints += pts
                     wildcardBreakdown.push({ category: cat.name, pick: cat.pick, winner: cat.winner, points: pts })
@@ -166,17 +108,10 @@ export function LeaderboardView() {
                 }
             })
         }
-
-        return {
-            player,
-            totalPoints: teamPointsTotal + playerWildcardPoints,
-            teamPoints: teamPointsTotal,
-            teamBreakdown,
-            wildcardPoints: playerWildcardPoints,
-            wildcardBreakdown
-        }
+        
+        return { player, totalPoints: teamPointsTotal + playerWildcardPoints, teamPoints: teamPointsTotal, teamBreakdown, wildcardPoints: playerWildcardPoints, wildcardBreakdown }
     }).sort((a, b) => b.totalPoints - a.totalPoints)
-  }, [players, teams, config, allWildcardPicks, wildcardWinners])
+  }, [loading, players, teams, config, allWildcardPicks, wildcardWinners])
 
   if (loading) return <div className="flex items-center justify-center p-20 text-blue-500"><RefreshCcw className="animate-spin w-12 h-12" /></div>
 
@@ -185,7 +120,7 @@ export function LeaderboardView() {
   return (
     <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-12 pb-32 text-white">
       
-      {/* PODIUM */}
+      {/* PODIUM UI remains the same */}
       <div className="grid grid-cols-3 gap-4 items-end max-w-2xl mx-auto pt-10 h-64 text-white">
         {podium[1] && (
             <div className="flex flex-col items-center">
@@ -227,10 +162,7 @@ export function LeaderboardView() {
         <div className="space-y-4">
           {scores.map((score, idx) => (
             <div key={score.player.id} className="bg-slate-900/50 rounded-[2rem] border border-slate-800 overflow-hidden transition-all hover:border-slate-700 shadow-xl">
-               <button 
-                 onClick={() => setExpandedPlayer(expandedPlayer === score.player.id ? null : score.player.id)}
-                 className="w-full p-6 flex items-center justify-between group"
-               >
+               <button onClick={() => setExpandedPlayer(expandedPlayer === score.player.id ? null : score.player.id)} className="w-full p-6 flex items-center justify-between group">
                   <div className="flex items-center gap-6">
                     <span className="font-black text-slate-700 text-xl italic w-6">0{idx + 1}</span>
                     <div className="text-left">
@@ -249,15 +181,10 @@ export function LeaderboardView() {
 
                <AnimatePresence>
                  {expandedPlayer === score.player.id && (
-                    <motion.div 
-                        initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-                        className="bg-slate-950/50 border-t border-slate-800 overflow-hidden"
-                    >
+                    <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="bg-slate-950/50 border-t border-slate-800 overflow-hidden">
                         <div className="p-8 space-y-10">
                             <section>
-                                <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4 flex items-center gap-2">
-                                    <Trophy className="w-3 h-3" /> Team Breakdown (+{score.teamPoints})
-                                </h3>
+                                <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4">Team Breakdown (+{score.teamPoints})</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-white">
                                     {score.teamBreakdown.map(({ team, points }) => (
                                         <div key={team.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg">
@@ -265,7 +192,9 @@ export function LeaderboardView() {
                                                 <span className="text-2xl">{team.flag_emoji}</span>
                                                 <div>
                                                     <p className="text-[10px] font-black text-white uppercase truncate w-24">{team.name}</p>
-                                                    <p className="text-[8px] font-bold text-slate-500 uppercase truncate">{(team.status || 'active').replace('_', ' ')}</p>
+                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                        {team.accomplishments?.map(acc => <span key={acc} className="text-[7px] font-black text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded-full uppercase">{acc.replace(/_/g, ' ')}</span>)}
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div className={cn("font-black text-sm italic", points > 0 ? "text-green-500" : points < 0 ? "text-red-500" : "text-slate-600")}>
@@ -273,20 +202,15 @@ export function LeaderboardView() {
                                             </div>
                                         </div>
                                     ))}
-                                    {score.teamBreakdown.length === 0 && <p className="col-span-full py-6 text-slate-700 font-bold italic text-[10px] uppercase tracking-widest opacity-50">No teams drafted in current session.</p>}
                                 </div>
                             </section>
 
+                            {/* Wildcard section remains the same */}
                             <section>
-                                <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4 flex items-center gap-2">
-                                    <Star className="w-3 h-3 text-wc-gold" /> Prediction Bonuses (+{score.wildcardPoints})
-                                </h3>
+                                <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] mb-4">Prediction Bonuses (+{score.wildcardPoints})</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {score.wildcardBreakdown.map((wc, i) => (
-                                        <div key={i} className={cn(
-                                            "p-4 rounded-2xl border flex flex-col gap-2 relative overflow-hidden shadow-lg",
-                                            wc.points > 0 ? "bg-wc-gold/10 border-wc-gold/30" : "bg-slate-900 border-slate-800"
-                                        )}>
+                                        <div key={i} className={cn("p-4 rounded-2xl border flex flex-col gap-2 relative overflow-hidden shadow-lg", wc.points > 0 ? "bg-wc-gold/10 border-wc-gold/30" : "bg-slate-900 border-slate-800")}>
                                             {wc.points > 0 && <div className="absolute top-0 right-0 p-1 bg-wc-gold text-wc-blue font-black text-[8px] rounded-bl-lg uppercase tracking-tighter">WINNER</div>}
                                             <p className="text-[8px] font-black text-slate-500 uppercase">{wc.category}</p>
                                             <div className="flex justify-between items-end">

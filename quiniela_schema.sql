@@ -190,3 +190,54 @@ create extension if not exists pg_cron;
 
 -- 2. Add a column to track sync timing
 ALTER TABLE draft_state ADD COLUMN IF NOT EXISTS last_api_sync TIMESTAMPTZ;
+
+
+UPDATE teams
+SET
+  picked_by_id = (SELECT id FROM players WHERE name = 'Ruthy'),
+  is_picked = true,
+  is_redraft = true
+WHERE name = 'Algeria';
+
+UPDATE teams
+SET
+  picked_by_id = (SELECT id FROM players WHERE name = 'Emanuel'),
+  is_picked = true,
+  is_redraft = true
+WHERE name = 'Ghana';
+
+UPDATE teams
+SET
+  picked_by_id = (SELECT id FROM players WHERE name = 'Daniel'),
+  is_picked = true,
+  is_redraft = true
+WHERE name = 'Cabo Verde';
+
+UPDATE teams
+SET
+  picked_by_id = (SELECT id FROM players WHERE name = 'Obi-Wan'),
+  is_picked = true,
+  is_redraft = true
+WHERE name = 'DR Congo';
+
+
+create or replace function append_accomplishment(team_id int, new_accomplishment text)
+returns void as $$
+  update teams
+  set accomplishments = array_append(accomplishments, new_accomplishment)
+  where id = team_id;
+$$ language sql;
+
+1 -- 1. Add the new array column for achievements
+2 ALTER TABLE teams ADD COLUMN IF NOT EXISTS accomplishments TEXT[] DEFAULT '{}';
+3
+4 -- 2. (Optional but Recommended) Drop the old, confusing status column
+5 ALTER TABLE teams DROP COLUMN IF EXISTS status;
+6
+7 -- 3. Create the helper function for safely adding achievements
+8 CREATE OR REPLACE FUNCTION append_accomplishment(team_id int, new_accomplishment text)
+9 RETURNS void AS $$
+10   UPDATE teams
+11   SET accomplishments = array_append(accomplishments, new_accomplishment)
+12   WHERE id = team_id;
+13 $$ LANGUAGE sql;
