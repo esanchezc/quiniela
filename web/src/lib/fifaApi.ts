@@ -51,7 +51,6 @@ export const syncTournamentData = async () => {
     // 1. Fetch our local team roster to map API teams to our internal IDs
     const { data: localTeams, error: dbError } = await supabase.from('teams').select('id, name')
     if (dbError || !localTeams) throw new Error("Fatal: Could not fetch local teams from Supabase.")
-    console.log(`SYNC: Found ${localTeams.length} local teams.`)
 
     const localTeamMap = new Map<string, number>()
     localTeams.forEach(t => {
@@ -64,7 +63,6 @@ export const syncTournamentData = async () => {
       fetchWithRetry(`${API_BASE}/competitions/WC/standings`),
       fetchWithRetry(`${API_BASE}/competitions/WC/matches`)
     ])
-    console.log("SYNC: Fetched latest standings and matches from API.")
 
     // 3. Determine which 3rd place teams actually advanced to the Round of 32
     const advancingTeamApiIds = new Set<number>()
@@ -76,11 +74,9 @@ export const syncTournamentData = async () => {
           advancingTeamApiIds.add(m.awayTeam.id)
         })
     }
-    console.log(`SYNC: Identified ${advancingTeamApiIds.size} teams that advanced from 3rd place.`)
 
     // 4. Process Group Stage results and assign accomplishments
     if (standingsData.standings) {
-      console.log("SYNC: Processing Group Stage accomplishments...")
       for (const group of standingsData.standings) {
         if (group.type !== 'TOTAL' || !group.table) continue
         for (const entry of group.table) {
@@ -103,22 +99,25 @@ export const syncTournamentData = async () => {
 
     // 5. Process Knockout Stage results and assign accomplishments
     if (matchesData.matches) {
-      console.log("SYNC: Processing Knockout Stage accomplishments...")
       const knockoutStages = ['LAST_32', 'LAST_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'THIRD_PLACE', 'FINAL']
       for (const stage of knockoutStages) {
         const stageMatches = matchesData.matches.filter((m: any) => m.stage === stage && m.status === 'FINISHED')
         for (const m of stageMatches) {
-          let winnerId: number | undefined, winnerName: string | undefined
+          let winnerId: number | undefined
+          let winnerName: string | undefined
 
           if (m.score.winner === 'HOME_TEAM') {
-            winnerName = m.homeTeam.name; winnerId = findLocalTeamId(winnerName)
+            winnerName = m.homeTeam.name
           } else if (m.score.winner === 'AWAY_TEAM') {
-            winnerName = m.awayTeam.name; winnerId = findLocalTeamId(winnerName)
+            winnerName = m.awayTeam.name
           }
 
-          if (winnerId && winnerName) {
-            const accomplishment = `${stage.toLowerCase()}_win`
-            await supabase.rpc('add_accomplishment', { team_id: winnerId, new_accomplishment: accomplishment })
+          if (winnerName) {
+            winnerId = findLocalTeamId(winnerName)
+            if (winnerId) {
+                const accomplishment = `${stage.toLowerCase()}_win`
+                await supabase.rpc('add_accomplishment', { team_id: winnerId, new_accomplishment: accomplishment })
+            }
           }
         }
       }
