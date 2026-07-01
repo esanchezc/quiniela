@@ -183,3 +183,10 @@ VALUES
  ALTER TABLE matches ADD COLUMN IF NOT EXISTS round INTEGER;
 -- 2. Wipe old matches to prevent errors
 TRUNCATE TABLE matches CASCADE;
+
+-- 1. Enable the required extensions
+create extension if not exists pg_net;
+create extension if not exists pg_cron;
+
+-- 2. Add a column to track sync timing
+ALTER TABLE draft_state ADD COLUMN IF NOT EXISTS last_api_sync TIMESTAMPTZ;
