@@ -1,7 +1,6 @@
 import { supabase } from './supabase'
 
 const API_BASE = '/api-fifa'
-const API_KEY = import.meta.env.VITE_FIFA_API_KEY
 
 const TEAM_NAME_MAP: Record<string, string> = {
   'United States': 'USA', 'Korea Republic': 'South Korea', 'Republic of Korea': 'South Korea',
@@ -19,7 +18,7 @@ const normalizeName = (name: string | null) => {
 
 async function fetchWithRetry(url: string, retries = 2): Promise<any> {
   try {
-    const response = await fetch(url, { headers: { 'X-Auth-Token': API_KEY || '' } })
+    const response = await fetch(url)
     if (response.status === 429) throw new Error('API limit hit.')
     if (!response.ok) {
         if (retries > 0 && [500, 502, 503, 504].includes(response.status)) {
@@ -49,29 +48,31 @@ export const syncTournamentData = async () => {
     ])
 
     const today = new Date().toDateString()
-    
-    // 1. Get List of ADVANCING TEAMS to Round of 32
-    const advancingTeamIds = new Set<number>()
+
+    // 1. Get List of all teams advancing to Round of 32 from API data
+    const advancingTeamApiIds = new Set<number>()
     if (matchesData.matches) {
         const r32matches = matchesData.matches.filter((m: any) => m.stage === 'ROUND_OF_32');
         for (const m of r32matches) {
-            if (m.homeTeam.id) advancingTeamIds.add(m.homeTeam.id)
-            if (m.awayTeam.id) advancingTeamIds.add(m.awayTeam.id)
+            if (m.homeTeam.id) advancingTeamApiIds.add(m.homeTeam.id)
+            if (m.awayTeam.id) advancingTeamApiIds.add(m.awayTeam.id)
         }
     }
-
+    
     // 2. Update Team Status from Standings
     if (standingsData.standings) {
         for (const group of standingsData.standings) {
             if (group.type !== 'TOTAL') continue
             for (const entry of group.table) {
                 const teamId = findLocalTeamId(entry.team.name)
+                // Only update if they've played
                 if (teamId && entry.playedGames > 0) {
                     let status = 'active'
                     if (entry.position === 1) status = 'group_1st'
                     else if (entry.position === 2) status = 'group_2nd'
                     else if (entry.position === 3) {
-                        status = advancingTeamIds.has(entry.team.id) ? 'group_3rd_adv' : 'not_advancing_3rd'
+                        // The critical fix: check against the actual R32 teams
+                        status = advancingTeamApiIds.has(entry.team.id) ? 'group_3rd_adv' : 'not_advancing_3rd'
                     }
                     else if (entry.position === 4) status = 'not_advancing_4th'
                     await supabase.from('teams').update({ status }).eq('id', teamId)
@@ -80,7 +81,7 @@ export const syncTournamentData = async () => {
         }
     }
 
-    // 3. Update Match Table
+    // 3. Update Match Table for Today/Live
     if (matchesData.matches) {
       const activeMatches = matchesData.matches.filter((m: any) => new Date(m.utcDate).toDateString() === today || ['IN_PLAY', 'PAUSED'].includes(m.status))
       for (const m of activeMatches) {
