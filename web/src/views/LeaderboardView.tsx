@@ -20,6 +20,7 @@ interface Team {
   flag_emoji: string
   picked_by_id: string | null
   is_picked: boolean
+  is_redraft: boolean
   status: string
 }
 
@@ -70,15 +71,8 @@ export function LeaderboardView() {
   useEffect(() => {
     fetchData()
     
-    // Unified refresh channel
-    const channel = supabase.channel('leaderboard-global-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_winners' }, () => fetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wildcard_picks' }, () => fetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_state' }, (payload: any) => {
-          // If draft is reset to 1, force a clean refresh
-          if (payload.new && payload.new.current_pick_number === 1) fetchData()
-      })
+    const channel = supabase.channel('leaderboard-final-sync')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchData())
       .subscribe()
 
     return () => {
@@ -88,7 +82,6 @@ export function LeaderboardView() {
 
   const fetchData = async () => {
     const { data: pData } = await supabase.from('players').select('id, name')
-    // We fetch all teams then filter in useMemo to ensure stale IDs don't linger
     const { data: tData } = await supabase.from('teams').select('*')
     const { data: cData } = await supabase.from('scoring_config').select('rule_name, points_value')
     const { data: wpData } = await supabase.from('wildcard_picks').select('*')
@@ -108,7 +101,6 @@ export function LeaderboardView() {
     const getPoints = (rule: string) => config.find(c => c.rule_name === rule)?.points_value || 0
 
     return players.map(player => {
-        // FILTER: Only teams actually picked by this player
         const playerTeams = teams.filter(t => t.picked_by_id === player.id && t.is_picked)
         let teamPointsTotal = 0
         
@@ -116,17 +108,26 @@ export function LeaderboardView() {
             let teamPoints = 0
             const s = team.status || 'active'
             
-            if (s === 'group_1st') teamPoints = getPoints('group_1st')
-            if (s === 'group_2nd') teamPoints = getPoints('group_2nd')
-            if (s === 'group_3rd_adv') teamPoints = getPoints('group_3rd_adv')
-            if (s === 'not_advancing_3rd') teamPoints = getPoints('not_advancing_3rd')
-            if (s === 'not_advancing_4th') teamPoints = getPoints('not_advancing_4th')
-            
-            if (s === 'r32_win') teamPoints = getPoints('group_1st') + getPoints('r32_win')
-            if (s === 'r16_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win')
-            if (s === 'qf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win')
-            if (s === 'sf_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win')
-            if (s === 'final_win') teamPoints = getPoints('group_1st') + getPoints('r32_win') + getPoints('r16_win') + getPoints('qf_win') + getPoints('sf_win') + getPoints('final_win')
+            let groupPoints = 0
+            if (s === 'group_1st') groupPoints = getPoints('group_1st')
+            else if (s === 'group_2nd') groupPoints = getPoints('group_2nd')
+            else if (s === 'group_3rd_adv') groupPoints = getPoints('group_3rd_adv')
+            else if (s === 'not_advancing_3rd') groupPoints = getPoints('not_advancing_3rd')
+            else if (s === 'not_advancing_4th') groupPoints = getPoints('not_advancing_4th')
+
+            let knockoutPoints = 0
+            if (s === 'r32_win') knockoutPoints = getPoints('r32_win')
+            if (s === 'r16_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win')
+            if (s === 'qf_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win')
+            if (s === 'sf_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win') + getPoints('sf_win')
+            if (s === 'final_win') knockoutPoints = getPoints('r16_win') + getPoints('r32_win') + getPoints('qf_win') + getPoints('sf_win') + getPoints('final_win')
+
+            // REDRAFT LOGIC
+            if (team.is_redraft) {
+                teamPoints = Math.ceil(knockoutPoints / 2) // Half points for redrafted teams, no group points
+            } else {
+                teamPoints = groupPoints + knockoutPoints
+            }
 
             teamPointsTotal += teamPoints
             return { team, points: teamPoints }
@@ -184,7 +185,7 @@ export function LeaderboardView() {
   return (
     <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-12 pb-32 text-white">
       
-      {/* THE PODIUM */}
+      {/* PODIUM */}
       <div className="grid grid-cols-3 gap-4 items-end max-w-2xl mx-auto pt-10 h-64 text-white">
         {podium[1] && (
             <div className="flex flex-col items-center">
